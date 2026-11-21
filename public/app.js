@@ -1,5 +1,5 @@
 import { SAMPLES, FIXTURE } from './samples.js';
-import { ENUMS, calibrateDuration, suggestMove, buildImagePrompt, checkConsistency, summarize } from './rules.js';
+import { ENUMS, calibrateDuration, suggestMove, buildImagePrompt, checkConsistency, summarize, entityUsage } from './rules.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -13,6 +13,7 @@ const state = {
   warnings: [],
   options: {},
   demo: false,
+  selectedShot: null,
 };
 
 const esc = (s) =>
@@ -42,6 +43,7 @@ function render() {
   $('#boardHead').hidden = !has;
   $('#boardBody').hidden = !has && !state.loading;
   ['btnExportCsv', 'btnExportXls', 'btnExportJson', 'btnPrint'].forEach((id) => ($('#' + id).disabled = !has));
+  $('#feedbackBox').hidden = !has;
 
   if (state.loading && !has) return renderSkeleton();
   if (!has) return;
@@ -122,6 +124,7 @@ function tableHTML() {
     for (const shot of scene.shots) {
       const voice = voiceOf(shot);
       const warn = warnIds.has(shot.id) ? ' is-warn' : '';
+      const sel = shot.id === state.selectedShot ? ' is-selected' : '';
       const dlg = (shot.dialogue || [])
         .map(
           (d) => `<span class="line"><span class="who">${esc(d.speaker)}</span>${esc(d.line_zh)}
@@ -129,7 +132,7 @@ function tableHTML() {
         )
         .join('');
 
-      rows += `<tr class="shot${warn}" data-shot="${esc(shot.id)}">
+      rows += `<tr class="shot${warn}${sel}" data-shot="${esc(shot.id)}">
         <td class="cell-id">${esc(shot.id)}<small>${esc(shot.angle)}</small></td>
         <td><select class="inline" data-f="shot_size">${opts(ENUMS.shot_size, shot.shot_size)}</select></td>
         <td class="c-comp"><select class="inline" data-f="composition">${opts(ENUMS.composition, shot.composition)}</select></td>
@@ -210,6 +213,16 @@ function refreshRowWarn() {
 }
 
 function bindBoardEvents() {
+  // 点一行 = 选中该镜头（供「统一」面板挂道具用）
+  $$('#boardBody tr.shot').forEach((tr) => {
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('input, select, [contenteditable], button')) return;
+      state.selectedShot = tr.dataset.shot;
+      refreshSelection();
+      if (state.tab === 'unity') renderInspector();
+    });
+  });
+
   $$('#boardBody select[data-f]').forEach((el) => {
     el.addEventListener('change', () => {
       const shot = findShot(el.closest('tr').dataset.shot);
@@ -256,8 +269,9 @@ function renderInspector() {
     body.innerHTML = '<p class="placeholder-note">生成后显示人物、场景、道具设定卡。</p>';
     return;
   }
-  body.innerHTML = state.tab === 'bible' ? bibleHTML() : checkHTML();
+  body.innerHTML = state.tab === 'bible' ? bibleHTML() : state.tab === 'unity' ? unityHTML() : checkHTML();
   if (state.tab === 'bible') bindBibleEvents();
+  if (state.tab === 'unity') bindUnityEvents();
 }
 
 function bibleHTML() {
@@ -303,6 +317,92 @@ function bibleHTML() {
 
   h += `<p class="placeholder-note" style="margin-top:14px">提示：锚点可直接改，改完所有镜头的首帧提示词会同步更新。</p>`;
   return h;
+}
+
+const TIMBRES = ['清冷偏低', '低沉沙哑', '温柔', '甜美', '活泼', '苍老', '浑厚', '中性'];
+
+function unityHTML() {
+  const { characters, props, total } = entityUsage(flatShots(), state.data.bible);
+  const target = state.selectedShot;
+  let h = '<p class="placeholder-note" style="margin-bottom:10px">这些设定会原样注入每个引用它的镜头，跨镜保持一致。</p>';
+
+  for (const c of characters) {
+    const cur = c.voice?.timbre || '';
+    const list = TIMBRES.includes(cur) || !cur ? TIMBRES : [cur, ...TIMBRES];
+    h += `<div class="uni">
+      <div class="uni__head"><span class="ent__id">${esc(c.id)}</span><span class="uni__name">${esc(c.name)}</span>
+        <span class="uni__count">${c.shots.length}/${total} 镜</span></div>
+      <div class="uni__row"><b>外观</b>${esc(c.appearance)}</div>
+      <div class="uni__row ${c.costume ? '' : 'is-missing'}"><b>服装</b>${c.costume ? esc(c.costume) : '未设定'}</div>
+      <div class="uni__row" style="display:flex;align-items:center;gap:6px">
+        <b>音色</b>
+        <select class="inline" data-voice="${esc(c.id)}" style="width:auto;flex:1">${list
+          .map((t) => `<option ${t === cur ? 'selected' : ''}>${esc(t)}</option>`)
+          .join('')}</select>
+      </div>
+      <div class="uni__shots">${
+        c.shots.map((id) => `<span class="uni__shot" data-goto="${id}">${id}</span>`).join('') ||
+        '<span class="uni__empty">未出场</span>'
+      }</div>
+    </div>`;
+  }
+
+  h += `<div class="ent__head" style="margin:16px 0 8px"><span class="ent__id">PROP</span><span class="ent__name">道具</span></div>`;
+  for (const p of props) {
+    h += `<div class="uni">
+      <div class="uni__head"><span class="ent__id">${esc(p.id)}</span><span class="uni__name">${esc(p.name)}</span>
+        <span class="uni__count">${p.shots.length} 镜</span></div>
+      <div class="uni__row"><b>外观</b>${esc(p.look)}</div>
+      <div class="uni__shots">${
+        p.shots.map((id) => `<span class="uni__shot" data-goto="${id}">${id}</span>`).join('') ||
+        '<span class="uni__empty">还没用上</span>'
+      }</div>
+      <button class="btn btn--ghost" data-addprop="${esc(p.id)}" style="margin-top:7px;font-size:10px;padding:3px 8px">${
+        target ? `加到 ${esc(target)}` : '选中一个镜头再加'
+      }</button>
+    </div>`;
+  }
+  return h;
+}
+
+function bindUnityEvents() {
+  $$('#inspectorBody [data-goto]').forEach((el) => {
+    el.addEventListener('click', () => {
+      state.selectedShot = el.dataset.goto;
+      refreshSelection();
+      toast('已选中 ' + el.dataset.goto);
+    });
+  });
+
+  $$('#inspectorBody [data-voice]').forEach((el) => {
+    el.addEventListener('change', () => {
+      const c = state.data.bible.characters.find((x) => x.id === el.dataset.voice);
+      if (!c) return;
+      c.voice = { ...(c.voice || {}), timbre: el.value };
+      afterEdit();
+      renderBoard();
+      renderInspector();
+      toast(`${c.name} 的音色已改为「${el.value}」`);
+    });
+  });
+
+  $$('#inspectorBody [data-addprop]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const id = el.dataset.addprop;
+      if (!state.selectedShot) return toast('先在表格里点一行，选中一个镜头');
+      const shot = findShot(state.selectedShot);
+      if (!shot) return;
+      if (shot.props.includes(id)) return toast('这个镜头已经有该道具了');
+      shot.props.push(id);
+      afterEdit();
+      renderInspector();
+      toast(`已把 ${id} 加到 ${shot.id}`);
+    });
+  });
+}
+
+function refreshSelection() {
+  $$('#boardBody tr.shot').forEach((tr) => tr.classList.toggle('is-selected', tr.dataset.shot === state.selectedShot));
 }
 
 function bindBibleEvents() {
@@ -391,6 +491,7 @@ async function generate() {
   if (state.busy) return;
 
   state.options = readOptions();
+  const notes = $('#notes').value.trim();
 
   setBusy(true);
   state.loading = true;
@@ -408,7 +509,7 @@ async function generate() {
     const r1 = await fetch('/api/bible', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script }),
+      body: JSON.stringify({ script, notes }),
     });
     const d1 = await r1.json();
     if (!r1.ok) throw Object.assign(new Error(d1.error || '抽取设定卡失败'), { code: d1.code });
@@ -417,7 +518,7 @@ async function generate() {
     const r2 = await fetch('/api/shots', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script, bible: d1.bible, options: state.options }),
+      body: JSON.stringify({ script, bible: d1.bible, options: state.options, notes }),
     });
     const d2 = await r2.json();
     if (!r2.ok) throw Object.assign(new Error(d2.error || '拆解分镜失败'), { code: d2.code });
@@ -464,6 +565,48 @@ function loadDemo(msg) {
   render();
   setStatus('is-demo', '演示模式 · 内置示例');
   if (msg) toast(msg);
+}
+
+// 按导演意见在原表上重做，其余镜头保持不动
+async function revise() {
+  const feedback = $('#feedback').value.trim();
+  if (!feedback) return toast('先写一句修改意见');
+  if (!state.data || state.busy) return;
+
+  setBusy(true);
+  state.loading = true;
+  render();
+  setStatus('is-busy', '正在改');
+  const btn = $('#btnRevise');
+  btn.disabled = true;
+  btn.textContent = '重做中…';
+
+  try {
+    const r = await fetch('/api/revise', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenes: state.data.scenes, feedback, bible: state.data.bible }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw Object.assign(new Error(d.error || '重做失败'), { code: d.code });
+
+    state.data.scenes = d.scenes;
+    state.loading = false;
+    recompute();
+    render();
+    $('#feedback').value = '';
+    const st = summarize(flatShots(), state.warnings);
+    setStatus('', `模型 · ${st.total.toFixed(1)}s`);
+    toast(`已按意见重做：${st.shots} 镜 / ${st.total.toFixed(1)} 秒`);
+  } catch (err) {
+    state.loading = false;
+    render();
+    toast('重做失败：' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '按意见重做';
+    setBusy(false);
+  }
 }
 
 // ---------------------------------------------------------------- 导出
@@ -586,6 +729,7 @@ function init() {
   });
 
   $('#btnGenerate').addEventListener('click', generate);
+  $('#btnRevise').addEventListener('click', revise);
 
   $('#btnTrySample').addEventListener('click', () => {
     const s = SAMPLES[0];

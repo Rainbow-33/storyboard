@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calibrateDuration, buildImagePrompt, checkConsistency, suggestMove, summarize } from '../public/rules.js';
+import { calibrateDuration, buildImagePrompt, checkConsistency, suggestMove, summarize, entityUsage } from '../public/rules.js';
 
 const bible = {
   characters: [
@@ -87,4 +87,27 @@ test('汇总数字正确', () => {
   const st = summarize(shots, checkConsistency(shots, bible));
   assert.equal(st.shots, 2);
   assert.equal(st.total, 7.5);
+});
+
+test('服装单独成字段，并注入首帧提示词', () => {
+  const b = { ...bible, characters: [{ ...bible.characters[0], costume: '米色风衣、深色长裤' }] };
+  const p = buildImagePrompt(shot({}), b, { style: '电影感写实', aspect: '9:16' });
+  assert.ok(p.includes('服装：米色风衣、深色长裤'));
+});
+
+test('没设服装 / 没绑音色要报警', () => {
+  const warns = checkConsistency([shot({})], bible);
+  assert.ok(warns.some((w) => w.code === 'NO_COSTUME'));
+  assert.ok(warns.some((w) => w.code === 'NO_VOICE'));
+});
+
+test('统一面板统计每个角色和道具覆盖了哪些镜头', () => {
+  const shots = [
+    shot({ id: 'A', characters: ['C1'], props: ['P1'] }),
+    shot({ id: 'B', characters: ['C1'] }),
+  ];
+  const u = entityUsage(shots, bible);
+  assert.deepEqual(u.characters[0].shots, ['A', 'B']);
+  assert.deepEqual(u.props[0].shots, ['A']);
+  assert.equal(u.total, 2);
 });

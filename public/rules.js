@@ -86,7 +86,10 @@ export function buildImagePrompt(shot, bible, options = {}) {
     parts.push(`【场景】${scene.name}｜${scene.time}｜${scene.weather}｜${scene.light}｜${scene.palette}`);
   }
   if (chars.length) {
-    parts.push('【人物锚点，不可改动】' + chars.map((c) => `${c.name}：${c.appearance}`).join('；'));
+    parts.push(
+      '【人物锚点，不可改动】' +
+        chars.map((c) => `${c.name}：${c.appearance}${c.costume ? `；服装：${c.costume}` : ''}`).join('；')
+    );
   }
   if (props.length) {
     parts.push('【道具】' + props.map((p) => `${p.name}：${p.look}`).join('；'));
@@ -195,7 +198,34 @@ export function checkConsistency(shots, bible, options = {}) {
     }
   }
 
+  // 9. 统一性：服装没设 / 音色没绑，就没法跨镜统一
+  for (const c of bible.characters || []) {
+    if (!c.costume) push('warn', 'NO_COSTUME', `${c.name} 没设服装`, '服装为空，每个镜头都可能被画成不同的衣服', null);
+    if (!c.voice?.timbre) push('warn', 'NO_VOICE', `${c.name} 没绑音色`, '没有音色档案，TTS 无法跨镜保持一致', null);
+  }
+
   return out;
+}
+
+/** 统计每个角色 / 道具被哪些镜头用到，用于「统一」面板 */
+export function entityUsage(shots, bible) {
+  const byChar = new Map();
+  const byProp = new Map();
+  for (const s of shots) {
+    for (const id of s.characters || []) {
+      if (!byChar.has(id)) byChar.set(id, []);
+      byChar.get(id).push(s.id);
+    }
+    for (const id of s.props || []) {
+      if (!byProp.has(id)) byProp.set(id, []);
+      byProp.get(id).push(s.id);
+    }
+  }
+  return {
+    characters: (bible.characters || []).map((c) => ({ ...c, shots: byChar.get(c.id) || [] })),
+    props: (bible.props || []).map((p) => ({ ...p, shots: byProp.get(p.id) || [] })),
+    total: shots.length,
+  };
 }
 
 export function summarize(shots, warnings) {

@@ -3,7 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BIBLE_SYSTEM, SHOTS_SYSTEM, buildBibleUser, buildShotsUser, ENUMS } from './prompts.mjs';
+import { BIBLE_SYSTEM, SHOTS_SYSTEM, REVISE_SYSTEM, buildBibleUser, buildShotsUser, buildReviseUser, ENUMS } from './prompts.mjs';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC = join(__dirname, 'public');
@@ -126,6 +126,7 @@ function normalizeBible(b) {
     role: c.role || '配角',
     age: c.age || '',
     appearance: c.appearance || '',
+    costume: c.costume || '',
     face: c.face || '',
     forbidden: Array.isArray(c.forbidden) ? c.forbidden.filter(Boolean) : [],
     voice: c.voice || {},
@@ -220,7 +221,7 @@ const server = createServer(async (req, res) => {
 
     // 第一步：抽取设定卡（人物 / 场景 / 道具）
     if (url.pathname === '/api/bible' && req.method === 'POST') {
-      const { script } = await readBody(req);
+      const { script, notes } = await readBody(req);
       if (!script || script.trim().length < 20) return send(res, 400, { error: '剧本太短，至少 20 个字' });
       if (script.length > 12000) return send(res, 400, { error: '剧本过长，建议 6000 字以内分段处理' });
 
@@ -228,7 +229,7 @@ const server = createServer(async (req, res) => {
       const raw = await callJson(
         [
           { role: 'system', content: BIBLE_SYSTEM },
-          { role: 'user', content: buildBibleUser(script) },
+          { role: 'user', content: buildBibleUser(script, notes) },
         ],
         { temperature: 0.3, maxTokens: 4000 }
       );
@@ -237,7 +238,7 @@ const server = createServer(async (req, res) => {
 
     // 第二步：带着设定卡拆镜头
     if (url.pathname === '/api/shots' && req.method === 'POST') {
-      const { script, bible, options } = await readBody(req);
+      const { script, bible, options, notes } = await readBody(req);
       if (!script) return send(res, 400, { error: '缺少剧本' });
       if (!bible || !bible.characters) return send(res, 400, { error: '缺少设定卡，请先完成第一步' });
 
@@ -245,9 +246,27 @@ const server = createServer(async (req, res) => {
       const raw = await callJson(
         [
           { role: 'system', content: SHOTS_SYSTEM },
-          { role: 'user', content: buildShotsUser({ script, bible, options }) },
+          { role: 'user', content: buildShotsUser({ script, bible, options, notes }) },
         ],
         { temperature: 0.7, maxTokens: 8000 }
+      );
+      return send(res, 200, { scenes: normalizeShots(raw, bible), ms: Date.now() - t0 });
+    }
+
+    // 第三步（可选）：按导演意见重做
+    if (url.pathname === '/api/revise' && req.method === 'POST') {
+      const { scenes, feedback, bible } = await readBody(req);
+      if (!feedback || !feedback.trim()) return send(res, 400, { error: '请先写修改意见' });
+      if (!Array.isArray(scenes) || !scenes.length) return send(res, 400, { error: '没有可修改的分镜表' });
+      if (!bible || !bible.characters) return send(res, 400, { error: '缺少设定卡' });
+
+      const t0 = Date.now();
+      const raw = await callJson(
+        [
+          { role: 'system', content: REVISE_SYSTEM },
+          { role: 'user', content: buildReviseUser({ scenes, feedback }) },
+        ],
+        { temperature: 0.5, maxTokens: 8000 }
       );
       return send(res, 200, { scenes: normalizeShots(raw, bible), ms: Date.now() - t0 });
     }

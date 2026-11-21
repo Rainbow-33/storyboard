@@ -96,10 +96,21 @@
       </div>
     </div>
 
+    <details class="notes" id="notesBox">
+      <summary>导演意见（可选）</summary>
+      <textarea id="notes" rows="3" placeholder="例：第 2 场再压一点；单镜别超过 4 秒；台词不要长句"></textarea>
+    </details>
+
     <button class="btn btn--generate" id="btnGenerate">
       <span>拆解分镜</span>
       <kbd>⌘ ↵</kbd>
     </button>
+
+    <div class="feedback" id="feedbackBox" hidden>
+      <label for="feedback">哪里不对？写一句，按你的意见重做</label>
+      <textarea id="feedback" rows="2" placeholder="例：第 3 镜太长，拆成两镜；Mint 的表情再冷一点"></textarea>
+      <button class="btn btn--solid" id="btnRevise">按意见重做</button>
+    </div>
 
     <div class="progress" id="progress" hidden>
       <div class="progress__step" data-step="bible"><i></i><span>建立人物 / 场景 / 道具档案</span></div>
@@ -140,6 +151,7 @@
   <aside class="panel panel--inspector">
     <div class="tabs" id="tabs">
       <button class="is-active" data-tab="bible">设定卡</button>
+      <button data-tab="unity">统一</button>
       <button data-tab="check">一致性 <em id="warnBadge" hidden>0</em></button>
     </div>
     <div class="inspector__body" id="inspectorBody">
