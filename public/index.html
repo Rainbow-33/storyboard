@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light" />
+<title>分镜台 · AI 剧本分镜助手</title>
+<link rel="stylesheet" href="/styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231B1917'/><path d='M8 10h16M8 16h10M8 22h16' stroke='%23F4F0E6' stroke-width='2.5' stroke-linecap='round'/></svg>" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand__mark" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="2.5" y="4.5" width="19" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      <path d="M7 8.5h6M7 12h10M7 15.5h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+    </svg>
+    <div class="brand__text">
+      <strong>分镜台</strong>
+      <span>STORYBOARD BENCH</span>
+    </div>
+  </div>
+
+  <div class="topbar__mid" id="statusChip" hidden></div>
+
+  <nav class="topbar__actions">
+    <button class="btn btn--ghost" id="btnExportCsv" disabled>CSV</button>
+    <button class="btn btn--ghost" id="btnExportXls" disabled>Excel</button>
+    <button class="btn btn--ghost" id="btnExportJson" disabled>JSON</button>
+    <button class="btn btn--solid" id="btnPrint" disabled>打印分镜本</button>
+  </nav>
+</header>
+
+<main class="workspace">
+
+  <!-- 左：剧本 -->
+  <aside class="panel panel--script">
+    <div class="panel__head">
+      <h2>剧本</h2>
+      <span class="hint" id="scriptCount">0 字</span>
+    </div>
+
+    <div class="script-samples" id="samples"></div>
+
+    <textarea id="script" class="script-input" spellcheck="false"
+      placeholder="把剧本、小说片段或分镜草稿粘进来…&#10;&#10;例：&#10;深夜，便利店。林晚在收银台后打着哈欠。&#10;门铃响，周衍浑身湿透站在门口，手里攥着一只旧怀表。&#10;「还你。」他说。&#10;林晚没有接。"></textarea>
+
+    <div class="options">
+      <div class="field">
+        <label for="optStyle">视觉风格</label>
+        <select id="optStyle">
+          <option value="写实" selected>电影感写实</option>
+          <option value="日漫">日式赛璐璐</option>
+          <option value="国漫">国漫厚涂</option>
+          <option value="条漫">竖屏条漫</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="optAspect">画幅</label>
+        <select id="optAspect">
+          <option value="9:16" selected>9:16 竖屏</option>
+          <option value="16:9">16:9 横屏</option>
+          <option value="2.39:1">2.39:1 宽银幕</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="optLang">台词</label>
+        <select id="optLang">
+          <option value="双语" selected>中泰双语</option>
+          <option value="中文">仅中文</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="optDur">目标时长</label>
+        <select id="optDur">
+          <option value="0" selected>自然长度</option>
+          <option value="30">约 30 秒</option>
+          <option value="60">约 60 秒</option>
+          <option value="90">约 90 秒</option>
+        </select>
+      </div>
+    </div>
+
+    <button class="btn btn--generate" id="btnGenerate">
+      <span>拆解分镜</span>
+      <kbd>⌘ ↵</kbd>
+    </button>
+
+    <div class="progress" id="progress" hidden>
+      <div class="progress__step" data-step="bible"><i></i><span>建立人物 / 场景 / 道具档案</span></div>
+      <div class="progress__step" data-step="shots"><i></i><span>按场景拆解镜头</span></div>
+      <div class="progress__step" data-step="done"><i></i><span>校准时长与运镜</span></div>
+    </div>
+
+    <p class="footnote">演示模式：未配置 API Key 时载入内置示例结果。</p>
+  </aside>
+
+  <!-- 中：分镜 -->
+  <section class="panel panel--board">
+    <div class="board__head" id="boardHead" hidden>
+      <div class="stats" id="stats"></div>
+      <div class="viewswitch" id="viewSwitch">
+        <button class="is-active" data-view="table">表格</button>
+        <button data-view="cards">卡片</button>
+      </div>
+    </div>
+
+    <div class="empty" id="emptyState">
+      <div class="empty__frame" aria-hidden="true">
+        <svg viewBox="0 0 320 180">
+          <rect x="8" y="8" width="304" height="164" rx="4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="5 5"/>
+          <path d="M60 60h70M60 84h120M60 108h90" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".55"/>
+          <path d="M214 48v84M240 48v84M266 48v84" stroke="currentColor" stroke-width="1" opacity=".28"/>
+        </svg>
+      </div>
+      <h3>还是一片空白</h3>
+      <p>左边粘一段剧本，点「拆解分镜」。<br/>会先建人物/场景/道具档案，再逐场拆镜头，最后用规则校准时长与运镜。</p>
+    </div>
+
+    <div class="board__body" id="boardBody" hidden></div>
+  </section>
+
+  <!-- 右：检视器 -->
+  <aside class="panel panel--inspector">
+    <div class="tabs" id="tabs">
+      <button class="is-active" data-tab="bible">设定卡</button>
+      <button data-tab="check">一致性 <em id="warnBadge" hidden>0</em></button>
+    </div>
+    <div class="inspector__body" id="inspectorBody">
+      <p class="placeholder-note">生成后显示人物、场景、道具设定卡。</p>
+    </div>
+  </aside>
+
+</main>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>
