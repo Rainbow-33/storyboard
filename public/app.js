@@ -369,17 +369,28 @@ function step(name) {
   });
 }
 
+// 下拉里有「自定义…」时，取输入框里的值
+function pick(selId, customId, fallback) {
+  const el = $(selId);
+  if (el.value === '__custom') return ($(customId).value || '').trim() || fallback;
+  return el.value;
+}
+
+function readOptions() {
+  return {
+    style: pick('#optStyle', '#optStyleCustom', '电影感写实'),
+    aspect: pick('#optAspect', '#optAspectCustom', '9:16'),
+    subLang: pick('#optLang', '#optLangCustom', ''),
+    targetDuration: Number(pick('#optDur', '#optDurCustom', '0')) || 0,
+  };
+}
+
 async function generate() {
   const script = $('#script').value.trim();
   if (script.length < 20) return toast('剧本太短，至少 20 个字');
   if (state.busy) return;
 
-  state.options = {
-    style: $('#optStyle').value,
-    aspect: $('#optAspect').value,
-    lang: $('#optLang').value,
-    targetDuration: Number($('#optDur').value),
-  };
+  state.options = readOptions();
 
   setBusy(true);
   state.loading = true;
@@ -417,6 +428,7 @@ async function generate() {
     state.data = { bible: d1.bible, scenes: d2.scenes, timing: { bible: d1.ms, shots: d2.ms } };
     state.demo = false;
     state.loading = false;
+    $('#demoNote').hidden = true;
     step('done');
     recompute();
     render();
@@ -443,7 +455,8 @@ async function generate() {
 function loadDemo(msg) {
   state.data = JSON.parse(JSON.stringify(FIXTURE));
   state.demo = true;
-  state.options = { style: '写实', aspect: '9:16', lang: '双语', targetDuration: 0 };
+  state.options = { style: '电影感写实', aspect: '9:16', subLang: '泰语', targetDuration: 0 };
+  $('#demoNote').hidden = false;
   if (!$('#script').value.trim()) $('#script').value = SAMPLES[0].text;
   $('#scriptCount').textContent = `${$('#script').value.length} 字`;
   recompute();
@@ -548,9 +561,22 @@ function init() {
       const s = SAMPLES.find((x) => x.id === btn.dataset.sample);
       $('#script').value = s.text;
       $('#scriptCount').textContent = `${s.text.length} 字`;
-      $$('#samples .chip').forEach((b) => b.classList.remove('is-on'));
-      btn.classList.add('is-on');
       $('#script').focus();
+    });
+  });
+
+  // 「自定义…」选中时露出输入框
+  [
+    ['#optStyle', '#optStyleCustom'],
+    ['#optAspect', '#optAspectCustom'],
+    ['#optLang', '#optLangCustom'],
+    ['#optDur', '#optDurCustom'],
+  ].forEach(([selId, customId]) => {
+    const sel = $(selId);
+    const inp = $(customId);
+    sel.addEventListener('change', () => {
+      inp.hidden = sel.value !== '__custom';
+      if (!inp.hidden) inp.focus();
     });
   });
 
@@ -564,7 +590,6 @@ function init() {
     const s = SAMPLES[0];
     $('#script').value = s.text;
     $('#scriptCount').textContent = `${s.text.length} 字`;
-    $$('#samples .chip').forEach((b) => b.classList.toggle('is-on', b.dataset.sample === s.id));
     generate();
   });
 

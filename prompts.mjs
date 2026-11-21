@@ -114,12 +114,12 @@ export function buildBibleUser(script) {
 }
 
 export function buildShotsUser({ script, bible, options }) {
-  const { style = '写实', aspect = '9:16', lang = '双语', targetDuration = 0 } = options || {};
+  const { style = '电影感写实', aspect = '9:16', subLang = '', targetDuration = 0 } = options || {};
   const styleMap = {
-    '写实': '电影感写实短剧',
-    '日漫': '日式赛璐璐动画',
-    '国漫': '国漫厚涂风格',
-    '条漫': '竖屏条漫分格风格',
+    '电影感写实': '电影感写实短剧',
+    '日式赛璐璐': '日式赛璐璐动画',
+    '国漫厚涂': '国漫厚涂风格',
+    '竖屏条漫': '竖屏条漫分格风格',
   };
   const roster = [
     '角色：' + (bible.characters || []).map((c) => `${c.id} ${c.name}`).join(' / '),
@@ -127,7 +127,7 @@ export function buildShotsUser({ script, bible, options }) {
     '道具：' + ((bible.props || []).map((p) => `${p.id} ${p.name}`).join(' / ') || '无'),
   ].join('\n');
 
-  const wantsThai = /泰|双语/.test(lang);
+  const styleText = styleMap[style] || `${style}（按这个描述理解风格）`;
   return `【剧本原文】
 """
 ${script}
@@ -140,9 +140,9 @@ ${JSON.stringify(bible, null, 2)}
 ${roster}
 
 【输出参数】
-- 视觉风格：${styleMap[style] || style}
+- 视觉风格：${styleText}
 - 画幅：${aspect}
-- 台词语言：${lang}${wantsThai ? '（line_th 必须给出泰语译文，line_zh 保留原文）' : '（line_th 留空字符串）'}
+- 台词语言：${subLang ? `中文 + ${subLang}` : '中文'}${subLang ? `（line_th 必须给出${subLang}译文，line_zh 保留原文）` : '（line_th 留空字符串）'}
 - 目标总时长：${targetDuration ? targetDuration + ' 秒左右' : '按内容自然长度'}
 
 请按场景拆分镜，只输出 JSON。`;

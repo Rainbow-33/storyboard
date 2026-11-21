@@ -175,16 +175,26 @@ body {
 }
 .hint { font-family: var(--mono); font-size: 10px; color: var(--ink-3); letter-spacing: .04em; }
 
-/* 示例 */
-.script-samples { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+/* 示例：放在输入框下面，跟"我的剧本"分开 */
+.samples-row {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin-top: 10px;
+}
+.samples-row__label {
+  font-size: 10.5px; color: var(--ink-3); letter-spacing: .04em; flex: none;
+}
+.script-samples { display: flex; flex-wrap: wrap; gap: 5px; }
 .chip {
   font-family: var(--sans); font-size: 11.5px;
-  padding: 4px 9px; border-radius: 100px;
-  border: 1px solid var(--line); background: transparent; color: var(--ink-2);
+  padding: 3px 9px; border-radius: 100px;
+  border: 1px dashed var(--line); background: transparent; color: var(--ink-2);
   cursor: pointer; transition: all .15s var(--ease);
 }
-.chip:hover { border-color: var(--red); color: var(--red); background: var(--red-soft); }
-.chip.is-on { border-color: var(--red); color: var(--red); background: var(--red-soft); }
+.chip:hover { border-style: solid; border-color: var(--red); color: var(--red); background: var(--red-soft); }
+
+.divider {
+  height: 1px; background: var(--line-2); margin: 13px 0 11px;
+}
 
 /* 剧本输入 */
 .script-input {
@@ -228,6 +238,16 @@ body {
   background-repeat: no-repeat; background-position: right 8px center;
 }
 .field select:focus { outline: none; border-color: var(--red); }
+
+/* 选了「自定义…」之后出现 */
+.field__custom {
+  margin-top: 4px;
+  font-family: var(--sans); font-size: 12px; color: var(--ink);
+  padding: 5px 8px; border-radius: var(--r-sm);
+  border: 1px solid var(--red); background: #FFFDF8;
+}
+.field__custom:focus { outline: none; box-shadow: 0 0 0 3px var(--red-soft); }
+.field__custom::placeholder { color: #B0A794; }
 
 /* 进度 */
 .progress {

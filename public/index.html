@@ -41,20 +41,27 @@
       <span class="hint" id="scriptCount">0 字</span>
     </div>
 
-    <div class="script-samples" id="samples"></div>
-
     <textarea id="script" class="script-input" spellcheck="false"
       placeholder="把剧本、小说片段或分镜草稿粘进来…&#10;&#10;例：&#10;深夜，便利店。林晚在收银台后打着哈欠。&#10;门铃响，周衍浑身湿透站在门口，手里攥着一只旧怀表。&#10;「还你。」他说。&#10;林晚没有接。"></textarea>
+
+    <div class="samples-row">
+      <span class="samples-row__label">没有剧本？载入</span>
+      <div class="script-samples" id="samples"></div>
+    </div>
+
+    <div class="divider"></div>
 
     <div class="options">
       <div class="field">
         <label for="optStyle">视觉风格</label>
         <select id="optStyle">
-          <option value="写实" selected>电影感写实</option>
-          <option value="日漫">日式赛璐璐</option>
-          <option value="国漫">国漫厚涂</option>
-          <option value="条漫">竖屏条漫</option>
+          <option value="电影感写实" selected>电影感写实</option>
+          <option value="日式赛璐璐">日式赛璐璐</option>
+          <option value="国漫厚涂">国漫厚涂</option>
+          <option value="竖屏条漫">竖屏条漫</option>
+          <option value="__custom">自定义…</option>
         </select>
+        <input id="optStyleCustom" class="field__custom" placeholder="例如：水墨动画" hidden />
       </div>
       <div class="field">
         <label for="optAspect">画幅</label>
@@ -62,14 +69,19 @@
           <option value="9:16" selected>9:16 竖屏</option>
           <option value="16:9">16:9 横屏</option>
           <option value="2.39:1">2.39:1 宽银幕</option>
+          <option value="__custom">自定义…</option>
         </select>
+        <input id="optAspectCustom" class="field__custom" placeholder="例如：4:3" hidden />
       </div>
       <div class="field">
         <label for="optLang">台词</label>
         <select id="optLang">
-          <option value="双语" selected>中泰双语</option>
-          <option value="中文">仅中文</option>
+          <option value="" selected>仅中文</option>
+          <option value="泰语">中泰双语</option>
+          <option value="英语">中英双语</option>
+          <option value="__custom">自定义…</option>
         </select>
+        <input id="optLangCustom" class="field__custom" placeholder="例如：日语" hidden />
       </div>
       <div class="field">
         <label for="optDur">目标时长</label>
@@ -78,7 +90,9 @@
           <option value="30">约 30 秒</option>
           <option value="60">约 60 秒</option>
           <option value="90">约 90 秒</option>
+          <option value="__custom">自定义…</option>
         </select>
+        <input id="optDurCustom" class="field__custom" type="number" min="5" max="600" placeholder="秒" hidden />
       </div>
     </div>
 
@@ -93,7 +107,7 @@
       <div class="progress__step" data-step="done"><i></i><span>校准时长与运镜</span></div>
     </div>
 
-    <p class="footnote">演示模式：未配置 API Key 时载入内置示例结果。</p>
+    <p class="footnote" id="demoNote" hidden>演示模式：未配置 API Key，显示的是内置示例结果。</p>
   </aside>
 
   <!-- 中：分镜 -->
@@ -115,8 +129,8 @@
         </svg>
       </div>
       <h3>还是一片空白</h3>
-      <p>左边粘一段剧本，点「拆解分镜」。<br/>会先建人物/场景/道具档案，再逐场拆镜头，最后用规则校准时长与运镜。</p>
-      <button class="btn btn--ghost" id="btnTrySample" style="margin-top:16px">用示例剧本试一次 →</button>
+      <p>左边粘一段剧本，或者在下面载入一个示例。<br/>点「拆解分镜」之后，会先建人物 / 场景 / 道具档案，再逐场拆镜头，最后用规则校准时长与运镜。</p>
+      <button class="btn btn--ghost" id="btnTrySample" style="margin-top:16px">载入示例并生成 →</button>
     </div>
 
     <div class="board__body" id="boardBody" hidden></div>

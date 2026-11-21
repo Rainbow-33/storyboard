@@ -22,10 +22,10 @@ export const SHOT_SIZE_LIMITS = {
 };
 
 const STYLE_MAP = {
-  写实: '电影感写实短剧，自然光效，浅景深',
-  日漫: '日式赛璐璐动画，干净线条，柔和阴影',
-  国漫: '国漫厚涂，体积光，浓重色调',
-  条漫: '竖屏条漫分格，平涂上色，粗描边',
+  电影感写实: '电影感写实短剧，自然光效，浅景深',
+  日式赛璐璐: '日式赛璐璐动画，干净线条，柔和阴影',
+  国漫厚涂: '国漫厚涂，体积光，浓重色调',
+  竖屏条漫: '竖屏条漫分格，平涂上色，粗描边',
 };
 
 const HIGH_EMOTION = ['震惊', '愤怒', '崩溃', '受伤', '决绝', '爆发', '恐惧', '痛苦'];
@@ -70,7 +70,7 @@ export function suggestMove(shot) {
 
 /** 首帧提示词：锚点原样拼进去，这是跨镜一致性的核心手段 */
 export function buildImagePrompt(shot, bible, options = {}) {
-  const style = STYLE_MAP[options.style] || STYLE_MAP['写实'];
+  const style = STYLE_MAP[options.style] || options.style || STYLE_MAP['电影感写实'];
   const aspect = options.aspect || '9:16';
   const scene = (bible.scenes || []).find((s) => s.id === shot.scene_id);
   const chars = (shot.characters || [])
@@ -187,10 +187,12 @@ export function checkConsistency(shots, bible, options = {}) {
     push('warn', 'DURATION_DRIFT', `总时长偏离目标`, `实际 ${total.toFixed(1)} 秒，目标 ${target} 秒，偏差超过 35%`, null);
   }
 
-  // 8. 台词语言不一致
-  if (/泰|双语/.test(options.lang || '')) {
+  // 8. 副语言台词缺失
+  if (options.subLang) {
     const missing = shots.filter((s) => (s.dialogue || []).some((d) => d.line_zh && !d.line_th));
-    if (missing.length) push('warn', 'MISSING_TH', `${missing.length} 个镜头缺泰语台词`, '双语模式下，TTS 和字幕都需要泰语文本', missing[0].id);
+    if (missing.length) {
+      push('warn', 'MISSING_L2', `${missing.length} 个镜头缺${options.subLang}台词`, `${options.subLang}模式下，TTS 和字幕都需要这一列`, missing[0].id);
+    }
   }
 
   return out;
