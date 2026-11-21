@@ -425,13 +425,14 @@ async function generate() {
     toast(`完成：${count} 镜 / ${total.toFixed(1)} 秒 · 用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   } catch (err) {
     state.loading = false;
-    if (err.code === 'NO_KEY' || /fetch|Failed/i.test(err.message)) {
+    if (err.code === 'NO_KEY') {
       loadDemo('未配置 API Key，已载入内置示例');
-    } else {
-      render();
-      toast('失败：' + err.message);
-      setStatus('is-demo', '出错');
+      return;
     }
+    render();
+    const isNetwork = /fetch|network|ECONN|aborted|timeout/i.test(err.message);
+    toast(isNetwork ? '连不上本地服务，确认终端里 node server.mjs 还在跑' : '生成失败：' + err.message);
+    setStatus('is-demo', isNetwork ? '连接中断' : '出错');
   } finally {
     clearInterval(tick);
     setBusy(false);

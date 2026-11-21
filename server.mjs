@@ -31,7 +31,26 @@ const BASE_URL =
 const MODEL = process.env.LLM_MODEL || (process.env.DEEPSEEK_API_KEY ? 'deepseek-chat' : 'glm-4-flash');
 
 // ---------- 模型调用 ----------
-async function callModel(messages, { temperature = 0.6, maxTokens = 8000 } = {}) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 网络抖动重试 2 次；401/400 这类确定性错误不重试
+async function callModel(messages, opts = {}) {
+  if (!API_KEY) throw Object.assign(new Error('未配置 API Key'), { code: 'NO_KEY' });
+  let lastErr;
+  for (let i = 0; i < 3; i++) {
+    try {
+      return await callModelOnce(messages, opts);
+    } catch (err) {
+      lastErr = err;
+      const retriable = /fetch failed|ECONNRESET|ETIMEDOUT|aborted|socket/i.test(err.message);
+      if (!retriable || i === 2) throw err;
+      await sleep(700 * (i + 1));
+    }
+  }
+  throw lastErr;
+}
+
+async function callModelOnce(messages, { temperature = 0.6, maxTokens = 8000 } = {}) {
   if (!API_KEY) throw Object.assign(new Error('未配置 API Key'), { code: 'NO_KEY' });
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 120000);
