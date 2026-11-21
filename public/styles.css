@@ -33,6 +33,9 @@
 
 * { box-sizing: border-box; }
 
+/* hidden 属性必须能压住 author 样式里的 display:flex / inline-flex */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   height: 100%;
@@ -549,9 +552,20 @@ input[type="number"] { -moz-appearance: textfield; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
-/* 窄屏：检视器变浮层 */
+/* 窄屏：收窄两侧栏，但不隐藏检视器 —— 设定卡是产品的一半 */
+@media (max-width: 1400px) {
+  .workspace { grid-template-columns: 310px minmax(0, 1fr) 300px; }
+}
 @media (max-width: 1180px) {
-  .workspace { grid-template-columns: 320px minmax(0, 1fr); }
+  .workspace { grid-template-columns: 272px minmax(0, 1fr) 264px; }
+  .panel--script { padding: 14px 12px 10px; }
+  .options { grid-template-columns: 1fr; }
+  .board__head { padding: 8px 12px; }
+  .stat { padding-right: 12px; margin-right: 12px; }
+}
+@media (max-width: 860px) {
+  .workspace { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .panel--script { max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--line); }
   .panel--inspector { display: none; }
 }
 
