@@ -410,6 +410,13 @@ tr.shot { border-bottom: 1px solid var(--line-2); transition: background .12s; }
 .uni__shot:hover { border-color: var(--red); color: var(--red); }
 .uni__empty { color: #B5AC9B; font-size: 10.5px; }
 
+.uni__outfit { border-top: 1px dashed var(--line-2); padding-top: 6px; margin-top: 6px; }
+.uni__outfit:first-of-type { border-top: 0; padding-top: 2px; margin-top: 0; }
+.uni__ohead { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.uni__oname { font-size: 11px; font-weight: 600; color: var(--ink); }
+.uni__odesc { font-size: 10.5px; color: var(--ink-3); line-height: 1.5; }
+.uni__set { margin-top: 5px; font-size: 9.5px; padding: 2px 7px; }
+
 tr.shot.is-selected { background: rgba(191, 69, 42, .07); box-shadow: inset 3px 0 0 var(--red); }
 tr.shot:hover { background: rgba(255, 253, 248, .75); }
 tr.shot.is-warn { box-shadow: inset 3px 0 0 var(--red); background: rgba(191,69,42,.035); }

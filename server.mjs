@@ -120,17 +120,29 @@ function normalizeBible(b) {
   const usedC = new Set();
   const usedS = new Set();
   const usedP = new Set();
-  const characters = (b.characters || []).map((c, i) => ({
-    id: uniqueId(c.id || `C${i + 1}`, usedC),
-    name: c.name || `角色${i + 1}`,
-    role: c.role || '配角',
-    age: c.age || '',
-    appearance: c.appearance || '',
-    costume: c.costume || '',
-    face: c.face || '',
-    forbidden: Array.isArray(c.forbidden) ? c.forbidden.filter(Boolean) : [],
-    voice: c.voice || {},
-  }));
+  const characters = (b.characters || []).map((c, i) => {
+    const id = uniqueId(c.id || `C${i + 1}`, usedC);
+    const raw = Array.isArray(c.outfits) && c.outfits.length ? c.outfits : null;
+    const outfits = raw
+      ? raw.map((o, j) => ({
+          id: o.id || `${id}-O${j + 1}`,
+          name: o.name || `造型${j + 1}`,
+          desc: o.desc || o.costume || '',
+        }))
+      : [{ id: `${id}-O1`, name: '默认', desc: c.costume || '' }];
+    return {
+      id,
+      name: c.name || `角色${i + 1}`,
+      role: c.role || '配角',
+      age: c.age || '',
+      appearance: c.appearance || '',
+      costume: outfits[0].desc,
+      outfits,
+      face: c.face || '',
+      forbidden: Array.isArray(c.forbidden) ? c.forbidden.filter(Boolean) : [],
+      voice: c.voice || {},
+    };
+  });
   const scenes = (b.scenes || []).map((s, i) => ({
     id: uniqueId(s.id || `S${i + 1}`, usedS),
     name: s.name || `场景${i + 1}`,
@@ -154,6 +166,12 @@ function normalizeBible(b) {
 function normalizeShots(raw, bible) {
   const scenes = Array.isArray(raw.scenes) ? raw.scenes : [];
   const usedScene = new Set();
+  const outfitOf = (cid, want) => {
+    const c = (bible.characters || []).find((x) => x.id === cid);
+    if (!c) return null;
+    const list = c.outfits || [];
+    return (list.find((o) => o.id === want) || list[0])?.id || null;
+  };
   return scenes.map((sc, si) => {
     const sceneId = uniqueId(sc.scene_id || bible.scenes[si]?.id || `S${si + 1}`, usedScene);
     const shots = (sc.shots || []).map((s, i) => ({
@@ -168,6 +186,16 @@ function normalizeShots(raw, bible) {
       image_hint: s.image_hint || '',
       characters: Array.isArray(s.characters) ? s.characters : [],
       props: Array.isArray(s.props) ? s.props : [],
+      outfits: (() => {
+        const m = {};
+        const chars = Array.isArray(s.characters) ? s.characters : [];
+        const given = s.outfits && typeof s.outfits === 'object' ? s.outfits : {};
+        for (const cid of chars) {
+          const id = outfitOf(cid, given[cid]);
+          if (id) m[cid] = id;
+        }
+        return m;
+      })(),
       dialogue: (Array.isArray(s.dialogue) ? s.dialogue : [])
         .filter((d) => d && (d.line_zh || d.line_th))
         .map((d) => ({

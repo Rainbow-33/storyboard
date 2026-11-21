@@ -68,6 +68,16 @@ export function suggestMove(shot) {
   return null;
 }
 
+/** 这个镜头里，该角色穿的是哪套 */
+export function resolveOutfit(shot, char) {
+  const list = char.outfits || [];
+  if (!list.length) {
+    return char.costume ? { id: null, name: '默认', desc: char.costume } : null;
+  }
+  const want = shot.outfits?.[char.id];
+  return list.find((o) => o.id === want) || list[0];
+}
+
 /** 首帧提示词：锚点原样拼进去，这是跨镜一致性的核心手段 */
 export function buildImagePrompt(shot, bible, options = {}) {
   const style = STYLE_MAP[options.style] || options.style || STYLE_MAP['电影感写实'];
@@ -88,7 +98,12 @@ export function buildImagePrompt(shot, bible, options = {}) {
   if (chars.length) {
     parts.push(
       '【人物锚点，不可改动】' +
-        chars.map((c) => `${c.name}：${c.appearance}${c.costume ? `；服装：${c.costume}` : ''}`).join('；')
+        chars
+          .map((c) => {
+            const o = resolveOutfit(shot, c);
+            return `${c.name}：${c.appearance}${o && o.desc ? `；服装：${o.desc}` : ''}`;
+          })
+          .join('；')
     );
   }
   if (props.length) {
@@ -200,7 +215,8 @@ export function checkConsistency(shots, bible, options = {}) {
 
   // 9. 统一性：服装没设 / 音色没绑，就没法跨镜统一
   for (const c of bible.characters || []) {
-    if (!c.costume) push('warn', 'NO_COSTUME', `${c.name} 没设服装`, '服装为空，每个镜头都可能被画成不同的衣服', null);
+    const hasCostume = (c.outfits || []).some((o) => o.desc) || c.costume;
+    if (!hasCostume) push('warn', 'NO_COSTUME', `${c.name} 没设服装`, '服装为空，每个镜头都可能被画成不同的衣服', null);
     if (!c.voice?.timbre) push('warn', 'NO_VOICE', `${c.name} 没绑音色`, '没有音色档案，TTS 无法跨镜保持一致', null);
   }
 
@@ -222,7 +238,17 @@ export function entityUsage(shots, bible) {
     }
   }
   return {
-    characters: (bible.characters || []).map((c) => ({ ...c, shots: byChar.get(c.id) || [] })),
+    characters: (bible.characters || []).map((c) => {
+      const ids = byChar.get(c.id) || [];
+      return {
+        ...c,
+        shots: ids,
+        outfits: (c.outfits || []).map((o) => ({
+          ...o,
+          shots: ids.filter((sid) => resolveOutfit(shots.find((s) => s.id === sid), c)?.id === o.id),
+        })),
+      };
+    }),
     props: (bible.props || []).map((p) => ({ ...p, shots: byProp.get(p.id) || [] })),
     total: shots.length,
   };

@@ -345,17 +345,22 @@ function unityHTML() {
       <div class="uni__head"><span class="ent__id">${esc(c.id)}</span><span class="uni__name">${esc(c.name)}</span>
         <span class="uni__count">${c.shots.length}/${total} 镜</span></div>
       <div class="uni__row"><b>外观</b>${esc(c.appearance)}</div>
-      <div class="uni__row ${c.costume ? '' : 'is-missing'}"><b>服装</b>${c.costume ? esc(c.costume) : '未设定'}</div>
-      <div class="uni__row" style="display:flex;align-items:center;gap:6px">
+      <div class="uni__row"><b>服装</b></div>
+      ${(c.outfits || [])
+        .map(
+          (o) => `<div class="uni__outfit">
+          <div class="uni__ohead"><span class="uni__oname">${esc(o.name)}</span><span class="uni__odesc">${esc(o.desc)}</span></div>
+          <div class="uni__shots">${o.shots.map((id) => `<span class="uni__shot" data-goto="${id}">${id}</span>`).join('') || '<span class="uni__empty">未使用</span>'}</div>
+          ${target ? `<button class="btn btn--ghost uni__set" data-setfit="${esc(c.id)}|${esc(o.id)}">套用到 ${esc(target)}</button>` : ''}
+        </div>`
+        )
+        .join('')}
+      <div class="uni__row" style="display:flex;align-items:center;gap:6px;margin-top:6px">
         <b>音色</b>
         <select class="inline" data-voice="${esc(c.id)}" style="width:auto;flex:1">${list
           .map((t) => `<option ${t === cur ? 'selected' : ''}>${esc(t)}</option>`)
           .join('')}</select>
       </div>
-      <div class="uni__shots">${
-        c.shots.map((id) => `<span class="uni__shot" data-goto="${id}">${id}</span>`).join('') ||
-        '<span class="uni__empty">未出场</span>'
-      }</div>
     </div>`;
   }
 
@@ -395,6 +400,21 @@ function bindUnityEvents() {
       renderBoard();
       renderInspector();
       toast(`${c.name} 的音色已改为「${el.value}」`);
+    });
+  });
+
+  $$('#inspectorBody [data-setfit]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const [cid, oid] = el.dataset.setfit.split('|');
+      if (!state.selectedShot) return toast('先在表格里点一行，选中一个镜头');
+      const shot = findShot(state.selectedShot);
+      if (!shot) return;
+      if (!shot.characters.includes(cid)) return toast('这个镜头里没有该角色');
+      shot.outfits = { ...(shot.outfits || {}), [cid]: oid };
+      afterEdit();
+      renderBoard();
+      renderInspector();
+      toast(`${shot.id} 已改用这套服装`);
     });
   });
 
