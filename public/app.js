@@ -84,6 +84,7 @@ function renderBoard() {
 }
 
 // 生成期间先铺骨架屏，别让中间空着
+let skeletonTimer = null;
 function renderSkeleton() {
   const body = $('#boardBody');
   body.hidden = false;
@@ -102,9 +103,20 @@ function renderSkeleton() {
       <div class="sk sk--num"></div>
     </div>`;
   body.innerHTML = `<div class="skeleton" aria-busy="true" aria-label="正在拆解分镜">
-    <div class="skeleton__note"><i></i>正在分析剧本，建立设定卡…</div>
+    <div class="skeleton__note"><i></i><span id="skNote">正在分析剧本…</span></div>
     ${[0, 1, 2, 3, 4, 5].map(row).join('')}
   </div>`;
+
+  clearInterval(skeletonTimer);
+  skeletonTimer = setInterval(() => {
+    const el = document.getElementById('skNote');
+    if (!el || !state.loading) {
+      clearInterval(skeletonTimer);
+      return;
+    }
+    const sec = Math.round((Date.now() - (state.loadStart || Date.now())) / 1000);
+    el.textContent = `正在拆解… ${sec}s（通常 15–40 秒）`;
+  }, 500);
 }
 
 function tableHTML() {
@@ -485,6 +497,30 @@ function readOptions() {
   };
 }
 
+// 统一的 POST：带超时，超过就明确报错，而不是一直转圈
+async function postJson(url, body, timeoutMs = 150000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    const j = await r.json();
+    if (!r.ok) throw Object.assign(new Error(j.error || '请求失败'), { code: j.code });
+    return j;
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw Object.assign(new Error(`超过 ${timeoutMs / 1000} 秒没有响应，模型可能过载`), { code: 'TIMEOUT' });
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function generate() {
   const script = $('#script').value.trim();
   if (script.length < 20) return toast('剧本太短，至少 20 个字');
@@ -495,6 +531,7 @@ async function generate() {
 
   setBusy(true);
   state.loading = true;
+  state.loadStart = Date.now();
   render();
   $('#progress').hidden = false;
   step('bible');
@@ -506,22 +543,10 @@ async function generate() {
   setStatus('is-busy', '正在拆解 · 0s');
 
   try {
-    const r1 = await fetch('/api/bible', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script, notes }),
-    });
-    const d1 = await r1.json();
-    if (!r1.ok) throw Object.assign(new Error(d1.error || '抽取设定卡失败'), { code: d1.code });
+    const d1 = await postJson('/api/bible', { script, notes });
 
     step('shots');
-    const r2 = await fetch('/api/shots', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script, bible: d1.bible, options: state.options, notes }),
-    });
-    const d2 = await r2.json();
-    if (!r2.ok) throw Object.assign(new Error(d2.error || '拆解分镜失败'), { code: d2.code });
+    const d2 = await postJson('/api/shots', { script, bible: d1.bible, options: state.options, notes });
 
     const count = (d2.scenes || []).reduce((n, s) => n + s.shots.length, 0);
     if (!count) throw new Error('模型没有拆出任何镜头，换个剧本片段试试');
@@ -543,8 +568,8 @@ async function generate() {
       return;
     }
     render();
-    const isNetwork = /fetch|network|ECONN|aborted|timeout/i.test(err.message);
-    toast(isNetwork ? '连不上本地服务，确认终端里 node server.mjs 还在跑' : '生成失败：' + err.message);
+    const isNetwork = /fetch|network|ECONN|timeout|没有响应/i.test(err.message);
+    toast(isNetwork ? err.message : '生成失败：' + err.message);
     setStatus('is-demo', isNetwork ? '连接中断' : '出错');
   } finally {
     clearInterval(tick);
@@ -575,6 +600,7 @@ async function revise() {
 
   setBusy(true);
   state.loading = true;
+  state.loadStart = Date.now();
   render();
   setStatus('is-busy', '正在改');
   const btn = $('#btnRevise');
@@ -582,13 +608,11 @@ async function revise() {
   btn.textContent = '重做中…';
 
   try {
-    const r = await fetch('/api/revise', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scenes: state.data.scenes, feedback, bible: state.data.bible }),
+    const d = await postJson('/api/revise', {
+      scenes: state.data.scenes,
+      feedback,
+      bible: state.data.bible,
     });
-    const d = await r.json();
-    if (!r.ok) throw Object.assign(new Error(d.error || '重做失败'), { code: d.code });
 
     state.data.scenes = d.scenes;
     state.loading = false;
