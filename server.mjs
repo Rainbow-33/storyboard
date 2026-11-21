@@ -88,9 +88,21 @@ async function callJson(messages, opts) {
 // ---------- 校验 ----------
 const pick = (arr, v, fallback) => (arr.includes(v) ? v : fallback);
 
+// 模型偶尔会给出重复 id，重复会让镜号串台，这里强制唯一
+function uniqueId(base, taken) {
+  let id = base;
+  let i = 2;
+  while (taken.has(id)) id = `${base}_${i++}`;
+  taken.add(id);
+  return id;
+}
+
 function normalizeBible(b) {
+  const usedC = new Set();
+  const usedS = new Set();
+  const usedP = new Set();
   const characters = (b.characters || []).map((c, i) => ({
-    id: c.id || `C${i + 1}`,
+    id: uniqueId(c.id || `C${i + 1}`, usedC),
     name: c.name || `角色${i + 1}`,
     role: c.role || '配角',
     age: c.age || '',
@@ -100,7 +112,7 @@ function normalizeBible(b) {
     voice: c.voice || {},
   }));
   const scenes = (b.scenes || []).map((s, i) => ({
-    id: s.id || `S${i + 1}`,
+    id: uniqueId(s.id || `S${i + 1}`, usedS),
     name: s.name || `场景${i + 1}`,
     time: s.time || '',
     weather: s.weather || '',
@@ -110,7 +122,7 @@ function normalizeBible(b) {
     props: Array.isArray(s.props) ? s.props : [],
   }));
   const props = (b.props || []).map((p, i) => ({
-    id: p.id || `P${i + 1}`,
+    id: uniqueId(p.id || `P${i + 1}`, usedP),
     name: p.name || `道具${i + 1}`,
     owner: p.owner || '',
     look: p.look || '',
@@ -121,8 +133,9 @@ function normalizeBible(b) {
 
 function normalizeShots(raw, bible) {
   const scenes = Array.isArray(raw.scenes) ? raw.scenes : [];
+  const usedScene = new Set();
   return scenes.map((sc, si) => {
-    const sceneId = sc.scene_id || bible.scenes[si]?.id || `S${si + 1}`;
+    const sceneId = uniqueId(sc.scene_id || bible.scenes[si]?.id || `S${si + 1}`, usedScene);
     const shots = (sc.shots || []).map((s, i) => ({
       id: `${sceneId}-${String(i + 1).padStart(2, '0')}`,
       scene_id: sceneId,

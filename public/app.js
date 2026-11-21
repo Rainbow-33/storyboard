@@ -616,4 +616,12 @@ function init() {
     });
 }
 
+// 暴露给测试与调试（无浏览器环境下也能驱动页面）
+window.__SB = {
+  state,
+  get shots() { return flatShots(); },
+  render,
+  recompute,
+};
+
 init();

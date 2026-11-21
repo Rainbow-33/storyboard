@@ -1,0 +1,14 @@
+{
+  "name": "storyboard-bench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI 剧本分镜助手 —— 剧本 → 设定卡 → 结构化分镜表",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node test/rules.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
