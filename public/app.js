@@ -1,5 +1,5 @@
 import { SAMPLES, FIXTURE } from './samples.js';
-import { ENUMS, calibrateDuration, suggestMove, buildImagePrompt, checkConsistency, summarize, SHOT_SIZE_LIMITS } from './rules.js';
+import { ENUMS, calibrateDuration, suggestMove, buildImagePrompt, checkConsistency, summarize } from './rules.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -12,7 +12,6 @@ const state = {
   loading: false,
   warnings: [],
   options: {},
-  target: 0,
   demo: false,
 };
 
@@ -21,8 +20,7 @@ const esc = (s) =>
 
 const flatShots = () => (state.data?.scenes || []).flatMap((s) => s.shots);
 
-// ---------------------------------------------------------------- 计算管线
-// 顺序：校准时长 → 运镜建议 → 锚点注入提示词 → 一致性检查
+// 每帧都重算一遍：时长校准 → 运镜建议 → 拼提示词 → 一致性检查
 function recompute() {
   if (!state.data) return;
   const bible = state.data.bible;
@@ -35,7 +33,6 @@ function recompute() {
     shot._prompt = buildImagePrompt(shot, bible, state.options);
   }
   state.warnings = checkConsistency(flatShots(), bible, state.options);
-  state.target = Number(state.options.targetDuration || 0);
 }
 
 // ---------------------------------------------------------------- 渲染
@@ -84,7 +81,7 @@ function renderBoard() {
   bindBoardEvents();
 }
 
-// 生成要等二十几秒，中间不能是一片空白
+// 生成期间先铺骨架屏，别让中间空着
 function renderSkeleton() {
   const body = $('#boardBody');
   body.hidden = false;
