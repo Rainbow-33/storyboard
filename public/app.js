@@ -606,7 +606,7 @@ function init() {
   const kbd = $('#btnGenerate kbd');
   if (!/Mac|iPhone/i.test(navigator.platform)) kbd.textContent = 'Ctrl ↵';
 
-  // 探测后端状态：没配 Key 直接进入演示模式，HR 打开就能看到东西
+  // 探测后端状态：没配 Key 时直接进演示模式，打开就能看到东西
   fetch('/api/health')
     .then((r) => r.json())
     .then((h) => {
