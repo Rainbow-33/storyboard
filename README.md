@@ -80,6 +80,18 @@ storyboard/
 node test/rules.test.mjs
 ```
 
+## 换一个模型
+
+只要对方兼容 OpenAI 的 `/chat/completions` 且支持 JSON 模式，改三个环境变量就行：
+
+```bash
+LLM_BASE_URL=https://api.siliconflow.cn/v1/chat/completions
+LLM_API_KEY=sk-xxxx
+LLM_MODEL=Qwen/Qwen2.5-72B-Instruct
+```
+
+内置支持：DeepSeek（默认）、智谱 GLM。
+
 ## 已知限制
 
 - 单次剧本建议 6000 字以内，长剧本要分段（一致性靠设定卡，跨段需要把设定卡传下去）

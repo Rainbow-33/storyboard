@@ -22,10 +22,12 @@ function loadEnv() {
 }
 loadEnv();
 
-const API_KEY = process.env.DEEPSEEK_API_KEY || process.env.ZHIPU_API_KEY || '';
-const BASE_URL = process.env.DEEPSEEK_API_KEY
-  ? 'https://api.deepseek.com/chat/completions'
-  : 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+const API_KEY = process.env.DEEPSEEK_API_KEY || process.env.ZHIPU_API_KEY || process.env.LLM_API_KEY || '';
+const BASE_URL =
+  process.env.LLM_BASE_URL ||
+  (process.env.DEEPSEEK_API_KEY
+    ? 'https://api.deepseek.com/chat/completions'
+    : 'https://open.bigmodel.cn/api/paas/v4/chat/completions');
 const MODEL = process.env.LLM_MODEL || (process.env.DEEPSEEK_API_KEY ? 'deepseek-chat' : 'glm-4-flash');
 
 // ---------- 模型调用 ----------

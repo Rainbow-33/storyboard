@@ -9,6 +9,7 @@ const state = {
   view: 'table',
   tab: 'bible',
   busy: false,
+  loading: false,
   warnings: [],
   options: {},
   target: 0,
@@ -40,11 +41,12 @@ function recompute() {
 // ---------------------------------------------------------------- 渲染
 function render() {
   const has = Boolean(state.data);
-  $('#emptyState').hidden = has;
+  $('#emptyState').hidden = has || state.loading;
   $('#boardHead').hidden = !has;
-  $('#boardBody').hidden = !has;
+  $('#boardBody').hidden = !has && !state.loading;
   ['btnExportCsv', 'btnExportXls', 'btnExportJson', 'btnPrint'].forEach((id) => ($('#' + id).disabled = !has));
 
+  if (state.loading && !has) return renderSkeleton();
   if (!has) return;
   renderStats();
   renderBoard();
@@ -75,10 +77,35 @@ function opts(list, cur) {
 
 function renderBoard() {
   const body = $('#boardBody');
-  const scroll = body.parentElement.scrollTop;
+  if (state.loading) return renderSkeleton();
+  const scroll = body.scrollTop;
   body.innerHTML = state.view === 'table' ? tableHTML() : cardsHTML();
-  body.parentElement.scrollTop = scroll;
+  body.scrollTop = scroll;
   bindBoardEvents();
+}
+
+// 生成要等二十几秒，中间不能是一片空白
+function renderSkeleton() {
+  const body = $('#boardBody');
+  body.hidden = false;
+  const row = (i) => `<div class="sk-row" style="animation-delay:${i * 60}ms">
+      <div class="sk sk--id"></div>
+      <div class="sk sk--tag"></div>
+      <div class="sk sk--tag"></div>
+      <div class="sk sk--tag"></div>
+      <div class="sk sk--num"></div>
+      <div class="sk sk--text">
+        <div class="sk sk--l1"></div><div class="sk sk--l2"></div>
+      </div>
+      <div class="sk sk--text">
+        <div class="sk sk--l1"></div><div class="sk sk--l2"></div>
+      </div>
+      <div class="sk sk--num"></div>
+    </div>`;
+  body.innerHTML = `<div class="skeleton" aria-busy="true" aria-label="正在拆解分镜">
+    <div class="skeleton__note"><i></i>正在分析剧本，建立设定卡…</div>
+    ${[0, 1, 2, 3, 4, 5].map(row).join('')}
+  </div>`;
 }
 
 function tableHTML() {
@@ -356,9 +383,16 @@ async function generate() {
   };
 
   setBusy(true);
+  state.loading = true;
+  render();
   $('#progress').hidden = false;
   step('bible');
-  setStatus('is-busy', '正在拆解');
+
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    setStatus('is-busy', `正在拆解 · ${Math.round((Date.now() - t0) / 1000)}s`);
+  }, 500);
+  setStatus('is-busy', '正在拆解 · 0s');
 
   try {
     const r1 = await fetch('/api/bible', {
@@ -378,22 +412,29 @@ async function generate() {
     const d2 = await r2.json();
     if (!r2.ok) throw Object.assign(new Error(d2.error || '拆解分镜失败'), { code: d2.code });
 
+    const count = (d2.scenes || []).reduce((n, s) => n + s.shots.length, 0);
+    if (!count) throw new Error('模型没有拆出任何镜头，换个剧本片段试试');
+
     state.data = { bible: d1.bible, scenes: d2.scenes, timing: { bible: d1.ms, shots: d2.ms } };
     state.demo = false;
+    state.loading = false;
     step('done');
     recompute();
     render();
     const total = summarize(flatShots(), state.warnings).total;
     setStatus('', `模型 · ${total.toFixed(1)}s`);
-    toast(`完成：${flatShots().length} 镜 / ${total.toFixed(1)} 秒`);
+    toast(`完成：${count} 镜 / ${total.toFixed(1)} 秒 · 用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   } catch (err) {
-    if (err.code === 'NO_KEY' || err.message.includes('fetch')) {
+    state.loading = false;
+    if (err.code === 'NO_KEY' || /fetch|Failed/i.test(err.message)) {
       loadDemo('未配置 API Key，已载入内置示例');
     } else {
+      render();
       toast('失败：' + err.message);
       setStatus('is-demo', '出错');
     }
   } finally {
+    clearInterval(tick);
     setBusy(false);
     setTimeout(() => ($('#progress').hidden = true), 600);
   }
