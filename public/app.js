@@ -457,7 +457,8 @@ function loadDemo(msg) {
   state.demo = true;
   state.options = { style: '电影感写实', aspect: '9:16', subLang: '泰语', targetDuration: 0 };
   $('#demoNote').hidden = false;
-  if (!$('#script').value.trim()) $('#script').value = SAMPLES[0].text;
+  const demoText = SAMPLES.find((s) => s.id === 'reunion')?.text || SAMPLES[0].text;
+  if (!$('#script').value.trim()) $('#script').value = demoText;
   $('#scriptCount').textContent = `${$('#script').value.length} 字`;
   recompute();
   render();

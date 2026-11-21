@@ -3,6 +3,52 @@
 
 export const SAMPLES = [
   {
+    id: 'brooch',
+    name: '蓝宝石胸针',
+    tag: '豪门 · 反转',
+    text: `内景 曼谷别墅 书房 夜
+
+吊灯只开了一半。Mint 跪在地毯上，Supatra 的鞋跟踩住她的手背。
+
+Supatra：胸针在哪儿？
+
+Mint：我没拿。
+
+Supatra 抬手，把一杯红酒倒在她头顶。
+
+门被推开。Nadech 站在门口，西装外套搭在手臂上，看见这一幕，停住。
+
+Nadech：放开她。
+
+Supatra：她偷了老夫人的蓝宝石胸针。
+
+Nadech 走过去，弯腰，把 Mint 的下巴抬起来看了一眼。
+
+Nadech：胸针是她的。
+
+Supatra：什么？
+
+Nadech：三十年前，我母亲拿走了她母亲的胸针。
+
+他从内袋掏出一枚蓝宝石胸针，放进 Mint 掌心。
+
+外景 别墅庭院 夜 雨
+
+Mint 站在雨里，五指收拢，握着那枚胸针。
+
+Nadech 撑伞走到她身后半步，停下。
+
+Nadech：你可以恨我。
+
+Mint：我知道。
+
+Nadech：但你得先活着。
+
+Mint 转过身，第一次直视他。
+
+Mint：那你为什么现在才说。`,
+  },
+  {
     id: 'reunion',
     name: '雨夜重逢',
     tag: '都市 · 虐恋',
