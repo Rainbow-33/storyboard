@@ -112,10 +112,12 @@ function tableHTML() {
   let rows = '';
   for (const scene of state.data.scenes) {
     const sc = bible.scenes.find((s) => s.id === scene.scene_id);
-    rows += `<tr class="scene-sep"><td colspan="8">
-      <span class="sid">${esc(scene.scene_id)}</span>${esc(sc?.name || '')}
-      ${scene.summary ? ' · ' + esc(scene.summary) : ''}
-      <span class="mood">${esc(scene.mood || '')}</span></td></tr>`;
+    rows += `<tr class="scene-sep"><td colspan="8"><div class="scene-sep__inner">
+      <span class="sid">${esc(scene.scene_id)}</span>
+      <span class="sname">${esc(sc?.name || '')}</span>
+      <span class="ssum">${esc(scene.summary || '')}</span>
+      <span class="mood">${esc(scene.mood || '')}</span>
+    </div></td></tr>`;
 
     for (const shot of scene.shots) {
       const voice = voiceOf(shot);
@@ -130,7 +132,7 @@ function tableHTML() {
       rows += `<tr class="shot${warn}" data-shot="${esc(shot.id)}">
         <td class="cell-id">${esc(shot.id)}<small>${esc(shot.angle)}</small></td>
         <td><select class="inline" data-f="shot_size">${opts(ENUMS.shot_size, shot.shot_size)}</select></td>
-        <td><select class="inline" data-f="composition">${opts(ENUMS.composition, shot.composition)}</select></td>
+        <td class="c-comp"><select class="inline" data-f="composition">${opts(ENUMS.composition, shot.composition)}</select></td>
         <td><select class="inline" data-f="camera_move">${opts(ENUMS.camera_move, shot.camera_move)}</select>
             ${shot._moveHint ? `<small style="color:#9A6B1C;font-size:9px">建议${shot._moveHint}</small>` : ''}</td>
         <td class="cell-dur"><input class="inline-num" data-f="duration" type="number" step="0.5" min="1" max="12" value="${shot.duration}"><small>s</small></td>
@@ -143,11 +145,11 @@ function tableHTML() {
 
   return `<div class="table-wrap"><table class="shots">
     <colgroup>
-      <col style="width:86px"><col style="width:82px"><col style="width:92px"><col style="width:86px">
-      <col style="width:72px"><col><col style="width:210px"><col style="width:104px">
+      <col class="c-id"><col class="c-size"><col class="c-comp"><col class="c-move">
+      <col class="c-dur"><col class="c-vis"><col class="c-dlg"><col class="c-voice">
     </colgroup>
     <thead><tr>
-      <th>镜号</th><th>景别</th><th>构图</th><th>运镜</th><th>时长</th><th>画面内容</th><th>台词 / 泰语</th><th>音色</th>
+      <th>镜号</th><th>景别</th><th class="c-comp">构图</th><th>运镜</th><th>时长</th><th>画面内容</th><th>台词 / 泰语</th><th>音色</th>
     </tr></thead>
     <tbody>${rows}</tbody></table></div>`;
 }

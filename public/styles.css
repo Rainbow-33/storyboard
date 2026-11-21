@@ -294,7 +294,16 @@ body {
 
 /* ---------- 表格 ---------- */
 .table-wrap { padding: 0; }
-table.shots { width: 100%; border-collapse: collapse; table-layout: fixed; }
+table.shots { width: 100%; min-width: 940px; border-collapse: collapse; table-layout: fixed; }
+
+/* 列宽集中在这里，方便按屏幕宽度调 */
+table.shots col.c-id    { width: 80px; }
+table.shots col.c-size  { width: 78px; }
+table.shots col.c-comp  { width: 86px; }
+table.shots col.c-move  { width: 82px; }
+table.shots col.c-dur   { width: 64px; }
+table.shots col.c-dlg   { width: 190px; }
+table.shots col.c-voice { width: 96px; }
 
 table.shots thead th {
   position: sticky; top: 0; z-index: 5;
@@ -314,11 +323,17 @@ table.shots thead th:first-child { padding-left: 18px; }
   font-size: 11px; letter-spacing: .06em; color: var(--ink-2);
   font-family: var(--sans);
 }
+.scene-sep__inner { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .scene-sep .sid {
   font-family: var(--mono); color: var(--red); font-size: 10px; letter-spacing: .1em;
-  margin-right: 10px; font-weight: 600;
+  font-weight: 600; flex: none;
 }
-.scene-sep .mood { float: right; color: var(--ink-3); font-size: 10.5px; }
+.scene-sep .sname { flex: none; }
+.scene-sep .ssum {
+  flex: 1; min-width: 0; color: var(--ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.scene-sep .mood { flex: none; color: var(--ink-3); font-size: 10.5px; }
 
 tr.shot { border-bottom: 1px solid var(--line-2); transition: background .12s; }
 tr.shot:hover { background: rgba(255,253,248,.75); }
@@ -550,11 +565,16 @@ input[type="number"] { -moz-appearance: textfield; }
 }
 
 /* 窄屏：收窄两侧栏，但不隐藏检视器 —— 设定卡是产品的一半 */
-@media (max-width: 1400px) {
-  .workspace { grid-template-columns: 310px minmax(0, 1fr) 300px; }
+/* 窄屏：先收侧栏，再收列，绝不把画面列压没 */
+@media (max-width: 1440px) {
+  .workspace { grid-template-columns: 272px minmax(0, 1fr) 268px; }
+  .c-comp { display: none; }
+  table.shots { min-width: 810px; }
+  table.shots col.c-dlg { width: 170px; }
+  table.shots col.c-voice { width: 88px; }
 }
-@media (max-width: 1180px) {
-  .workspace { grid-template-columns: 272px minmax(0, 1fr) 264px; }
+@media (max-width: 1100px) {
+  .workspace { grid-template-columns: 252px minmax(0, 1fr) 248px; }
   .panel--script { padding: 14px 12px 10px; }
   .options { grid-template-columns: 1fr; }
   .board__head { padding: 8px 12px; }
