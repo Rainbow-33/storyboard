@@ -191,7 +191,7 @@ export function checkConsistency(shots, bible, options = {}) {
   }
 
   // 8. 台词语言不一致
-  if ((options.lang || '').includes('泰')) {
+  if (/泰|双语/.test(options.lang || '')) {
     const missing = shots.filter((s) => (s.dialogue || []).some((d) => d.line_zh && !d.line_th));
     if (missing.length) push('warn', 'MISSING_TH', `${missing.length} 个镜头缺泰语台词`, '双语模式下，TTS 和字幕都需要泰语文本', missing[0].id);
   }
