@@ -560,6 +560,14 @@ function init() {
 
   $('#btnGenerate').addEventListener('click', generate);
 
+  $('#btnTrySample').addEventListener('click', () => {
+    const s = SAMPLES[0];
+    $('#script').value = s.text;
+    $('#scriptCount').textContent = `${s.text.length} 字`;
+    $$('#samples .chip').forEach((b) => b.classList.toggle('is-on', b.dataset.sample === s.id));
+    generate();
+  });
+
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
