@@ -46,9 +46,13 @@ DEEPSEEK_API_KEY=sk-xxxx
 
 一个角色可以有多套服装（换装），每个镜头都标明穿的是哪套，首帧提示词据此拼装。剧本里写"换了礼服"，模型就会给两套，场次之间自动切换。
 
-输出字段：镜号、景别、机位、构图、运镜、时长、画面内容、首帧提示词、角色、道具、台词（中/泰）、音色、音效、情绪。
+输出字段：镜头号（ep01s01）、画面描述、中英双语台词、运镜方式/景别、人物/场景/道具（中英双名）、备注（音效 / 首帧承接 / 表情）、建议时长。表格 7 列，照分镜本的习惯排。
 
-导出 CSV、Excel、JSON，或者直接打印成分镜本。
+**设定卡能出参考图**：人物、每套服装、场景、道具各一张，用图片模型生成，存在服务端，同一句提示词不重复花钱。点卡片进二级页面可以改提示词、写「建议修改」（先让文本模型改写成新提示词，再出图）。
+
+**分集管理**：左上角切换 / 新建集，每集独立存剧本和分镜，切回来还在。镜号按 `ep01s01` 连续编号。
+
+导出 CSV、Excel、JSON、**Word（真 .docx，自己拼 OOXML 打的包）**，或者直接打印成分镜本。
 
 ## 为什么这么设计
 
@@ -66,12 +70,14 @@ DEEPSEEK_API_KEY=sk-xxxx
 ## 目录
 
 ```
-server.mjs            Node 服务：静态托管 + 调模型 + JSON 修复重试
+server.mjs            Node 服务：静态托管 + 调模型 + 出图 + JSON 修复重试
 prompts.mjs           两段式提示词
 public/
-  index.html          三栏界面
+  index.html          三栏界面 + 二级详情页
   app.js              状态与渲染
   rules.js            规则引擎（纯函数）
+  docx.js             读 .docx（上传剧本用）
+  export-docx.js      写 .docx（自己拼 OOXML + zip，不依赖库）
   styles.css          样式
   samples.js          内置示例 + 离线兜底数据
 test/rules.test.mjs   规则引擎单测
@@ -85,19 +91,26 @@ node test/rules.test.mjs
 
 ## 换模型
 
-兼容 OpenAI 的 `/chat/completions` 就能用：
+分镜和出图都走 OpenAI 兼容接口，改 `.env` 就行：
 
 ```
-LLM_BASE_URL=https://api.siliconflow.cn/v1/chat/completions
+# 文本（分镜、改写提示词）
+LLM_BASE_URL=https://api.openai-next.com/v1
 LLM_API_KEY=sk-xxxx
-LLM_MODEL=Qwen/Qwen2.5-72B-Instruct
+LLM_MODEL=gpt-5.6-sol
+
+# 出图
+IMAGE_MODEL=gpt-image-2
+IMAGE_QUALITY=medium
 ```
 
-默认支持 DeepSeek 和智谱 GLM。
+填了 `LLM_API_KEY` 就走这套；留空则自动退回 DeepSeek / 智谱，界面照常能看。
+出图约 60–100 秒一张，参考图存 `public/thumbs/`（已在 gitignore）。
 
 ## 还没做的
 
-- 配图：只生成提示词，没真的出图
+- 视频：出图只有关键帧，没接图生视频
 - 音色：只做到匹配和确认，没接 TTS 出声
 - 长剧本：建议 6000 字以内，跨段需要把设定卡传下去
 - 泰语台词是模型翻译的，没有术语表校验
+- 表格里没有缩略图，图在卡片视图和二级页面里看

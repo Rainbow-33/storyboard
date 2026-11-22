@@ -1,5 +1,7 @@
 import { SAMPLES, FIXTURE } from './samples.js';
 import { ENUMS, calibrateDuration, suggestMove, buildImagePrompt, checkConsistency, summarize, entityUsage } from './rules.js';
+import { docxToText } from './docx.js';
+import { buildStoryboardDocx } from './export-docx.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -14,7 +16,110 @@ const state = {
   options: {},
   demo: false,
   selectedShot: null,
+  images: {},      // "shot:S1-01" / "char:C1" -> /thumbs/xxx.png
+  promptEdits: {}, // 手动改过的提示词，优先于自动生成的那句
+  detailKey: null,
+  detailKind: null,
+  detailRefs: [],
+  episode: '01',
+  episodeName: '',
+  episodes: [],
+  currentEpId: null,
+  bibleDirty: false, // 设定卡被手动改过 → 下次拆解直接拿它当约束
 };
+
+const STORE_IMAGES = 'sb.images';
+const STORE_PROMPTS = 'sb.promptEdits';
+
+function loadStore() {
+  try {
+    state.images = JSON.parse(localStorage.getItem(STORE_IMAGES) || '{}') || {};
+    state.promptEdits = JSON.parse(localStorage.getItem(STORE_PROMPTS) || '{}') || {};
+  } catch {
+    state.images = {};
+    state.promptEdits = {};
+  }
+}
+
+function saveStore() {
+  try {
+    localStorage.setItem(STORE_IMAGES, JSON.stringify(state.images));
+    localStorage.setItem(STORE_PROMPTS, JSON.stringify(state.promptEdits));
+  } catch {
+    /* 存储满了就算了，图还在服务端 */
+  }
+}
+
+// ---------------------------------------------------------------- 分集管理
+const STORE_EPS = 'sb.episodes';
+const STORE_CUR = 'sb.currentEp';
+
+function epSaveCurrent() {
+  const ep = state.episodes.find((e) => e.id === state.currentEpId);
+  if (!ep) return;
+  ep.no = ($('#epNo').value || '01').trim() || '01';
+  ep.name = ($('#epName').value || '').trim();
+  ep.script = $('#script').value;
+  ep.notes = $('#notes').value;
+  ep.data = state.data || null;
+  ep.images = state.images;
+  ep.promptEdits = state.promptEdits;
+  try {
+    localStorage.setItem(STORE_EPS, JSON.stringify(state.episodes));
+    localStorage.setItem(STORE_CUR, state.currentEpId);
+  } catch {
+    toast('集太多，本地存不下了（图片仍存服务端）');
+  }
+}
+
+function epRenderSelect() {
+  const sel = $('#epSelect');
+  sel.innerHTML = state.episodes
+    .map((e) => `<option value="${esc(e.id)}">ep${esc(e.no)}${e.name ? ' · ' + esc(e.name) : ''}${e.data ? '' : '（空）'}</option>`)
+    .join('');
+  sel.value = state.currentEpId;
+}
+
+function epLoad(id) {
+  const ep = state.episodes.find((e) => e.id === id);
+  if (!ep) return;
+  state.currentEpId = id;
+  state.episode = ep.no || '01';
+  state.episodeName = ep.name || '';
+  state.data = ep.data ? JSON.parse(JSON.stringify(ep.data)) : null;
+  state.images = ep.images || {};
+  state.promptEdits = ep.promptEdits || {};
+  state.bibleDirty = false;
+  $('#epNo').value = state.episode;
+  $('#epName').value = state.episodeName;
+  $('#script').value = ep.script || '';
+  $('#scriptCount').textContent = `${(ep.script || '').length} 字`;
+  $('#notes').value = ep.notes || '';
+  $('#fileChip').hidden = true;
+  if (state.data) recompute();
+  render();
+  epRenderSelect();
+}
+
+function initEpisodes() {
+  try {
+    state.episodes = JSON.parse(localStorage.getItem(STORE_EPS) || '[]') || [];
+  } catch {
+    state.episodes = [];
+  }
+  if (!state.episodes.length) {
+    state.episodes = [{ id: 'e' + Date.now(), no: '01', name: '', script: '', notes: '', data: null }];
+  }
+  const saved = (() => {
+    try {
+      return localStorage.getItem(STORE_CUR);
+    } catch {
+      return null;
+    }
+  })();
+  const cur = state.episodes.find((e) => e.id === saved) ? saved : state.episodes[0].id;
+  epLoad(cur);
+}
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -42,7 +147,7 @@ function render() {
   $('#emptyState').hidden = has || state.loading;
   $('#boardHead').hidden = !has;
   $('#boardBody').hidden = !has && !state.loading;
-  ['btnExportCsv', 'btnExportXls', 'btnExportJson', 'btnPrint'].forEach((id) => ($('#' + id).disabled = !has));
+  ['btnExportCsv', 'btnExportXls', 'btnExportJson', 'btnExportDocx', 'btnPrint'].forEach((id) => ($('#' + id).disabled = !has));
   $('#feedbackBox').hidden = !has;
 
   if (state.loading && !has) return renderSkeleton();
@@ -115,7 +220,10 @@ function renderSkeleton() {
       return;
     }
     const sec = Math.round((Date.now() - (state.loadStart || Date.now())) / 1000);
-    el.textContent = `正在拆解… ${sec}s（通常 15–40 秒）`;
+    el.textContent =
+      sec < 60
+        ? `正在拆解… ${sec}s（通常 40–90 秒）`
+        : `正在拆解… ${sec}s（仍在处理，请稍候）`;
   }, 500);
 }
 
@@ -126,7 +234,7 @@ function tableHTML() {
   let rows = '';
   for (const scene of state.data.scenes) {
     const sc = bible.scenes.find((s) => s.id === scene.scene_id);
-    rows += `<tr class="scene-sep"><td colspan="8"><div class="scene-sep__inner">
+    rows += `<tr class="scene-sep"><td colspan="7"><div class="scene-sep__inner">
       <span class="sid">${esc(scene.scene_id)}</span>
       <span class="sname">${esc(sc?.name || '')}</span>
       <span class="ssum">${esc(scene.summary || '')}</span>
@@ -145,28 +253,71 @@ function tableHTML() {
         .join('');
 
       rows += `<tr class="shot${warn}${sel}" data-shot="${esc(shot.id)}">
-        <td class="cell-id">${esc(shot.id)}<small>${esc(shot.angle)}</small></td>
-        <td><select class="inline" data-f="shot_size">${opts(ENUMS.shot_size, shot.shot_size)}</select></td>
-        <td class="c-comp"><select class="inline" data-f="composition">${opts(ENUMS.composition, shot.composition)}</select></td>
-        <td><select class="inline" data-f="camera_move">${opts(ENUMS.camera_move, shot.camera_move)}</select>
-            ${shot._moveHint ? `<small style="color:#9A6B1C;font-size:9px">建议${shot._moveHint}</small>` : ''}</td>
-        <td class="cell-dur"><input class="inline-num" data-f="duration" type="number" step="0.5" min="1" max="12" value="${shot.duration}"><small>s</small></td>
+        <td class="cell-id">${esc(displayId(shot))}<small>${esc(shot.id)} · ${esc(shot.angle)}</small></td>
         <td class="cell-visual"><span contenteditable="true" data-f="visual">${esc(shot.visual)}</span><span class="emotion">${esc(shot.emotion || '')}</span></td>
-        <td class="cell-dlg">${dlg || '<span class="none">—</span>'}</td>
-        <td class="cell-voice">${voice ? `${esc(voice.name)}<em>${esc(voice.desc)}</em>` : '<span class="none">—</span>'}</td>
+        <td class="cell-dlg">${dlg || '<span class="none">—</span>'}${
+          voice ? `<div class="cell-voice"><b>音色</b>${esc(voice.name)} · ${esc(voice.desc)}</div>` : ''
+        }</td>
+        <td class="cell-cam">
+          <select class="inline" data-f="camera_move">${opts(ENUMS.camera_move, shot.camera_move)}</select>
+          <select class="inline" data-f="shot_size">${opts(ENUMS.shot_size, shot.shot_size)}</select>
+          <select class="inline" data-f="composition">${opts(ENUMS.composition, shot.composition)}</select>
+          ${shot._moveHint ? `<small class="hint-move">建议${esc(shot._moveHint)}</small>` : ''}
+        </td>
+        <td class="cell-ent">${entHTML(shot)}</td>
+        <td class="cell-note">${noteHTML(shot)}</td>
+        <td class="cell-dur"><input class="inline-num" data-f="duration" type="number" step="0.5" min="1" max="12" value="${shot.duration}"><small>s</small></td>
       </tr>`;
     }
   }
 
   return `<div class="table-wrap"><table class="shots">
     <colgroup>
-      <col class="c-id"><col class="c-size"><col class="c-comp"><col class="c-move">
-      <col class="c-dur"><col class="c-vis"><col class="c-dlg"><col class="c-voice">
+      <col class="c-id"><col class="c-vis"><col class="c-dlg"><col class="c-move">
+      <col class="c-ent"><col class="c-note"><col class="c-dur">
     </colgroup>
     <thead><tr>
-      <th>镜号</th><th>景别</th><th class="c-comp">构图</th><th>运镜</th><th>时长</th><th>画面内容</th><th>台词 / 泰语</th><th>音色</th>
+      <th>镜头号</th><th>画面描述</th><th>中英双语台词</th><th>运镜方式 / 景别</th><th>人物 / 场景 / 道具</th><th>备注（音效 / 首帧）</th><th>建议时长</th>
     </tr></thead>
     <tbody>${rows}</tbody></table></div>`;
+}
+
+// 镜头号按「集 + 全场连续编号」显示，如 ep01s03；内部 id（S1-03）留在小字里做定位
+function shotNoMap() {
+  const m = new Map();
+  let i = 0;
+  for (const sc of state.data?.scenes || []) for (const s of sc.shots) m.set(s.id, ++i);
+  return m;
+}
+
+function displayId(shot) {
+  const ep = String(state.episode || '01').padStart(2, '0');
+  const n = shotNoMap().get(shot.id) || 1;
+  return `ep${ep}s${String(n).padStart(2, '0')}`;
+}
+
+function entHTML(shot) {
+  const b = state.data.bible;
+  const chars = (shot.characters || []).map((id) => b.characters.find((c) => c.id === id)).filter(Boolean);
+  const props = (shot.props || []).map((id) => (b.props || []).find((p) => p.id === id)).filter(Boolean);
+  const sc = b.scenes.find((s) => s.id === shot.scene_id);
+  const one = (x) => `${esc(x.name)}${x.name_en ? `<i>${esc(x.name_en)}</i>` : ''}`;
+  const line = (label, arr) => (arr.length ? `<div><b>${label}</b>${arr.map(one).join('、')}</div>` : '');
+  const html =
+    line('人物', chars) +
+    (sc ? `<div><b>场景</b>${one(sc)}</div>` : '') +
+    line('道具', props);
+  return html || '<span class="none">—</span>';
+}
+
+function noteHTML(shot) {
+  const cont = String(shot.continuity || '').replace(/^首帧承接[:：]\s*/, '');
+  return (
+    [
+      shot.sfx ? `<div><b>音效</b>${esc(shot.sfx)}</div>` : '',
+      cont ? `<div><b>首帧</b>${esc(cont)}</div>` : '',
+    ].join('') || '<span class="none">—</span>'
+  );
 }
 
 function voiceOf(shot) {
@@ -188,9 +339,10 @@ function cardsHTML() {
       const dlg = (shot.dialogue || [])
         .map((d) => `<div><span class="who">${esc(d.speaker)}</span>${esc(d.line_zh)}${d.line_th ? `<span class="th">${esc(d.line_th)}</span>` : ''}</div>`)
         .join('');
+      const shotImg = state.images[`shot:${shot.id}`];
       html += `<article class="shotcard" style="animation-delay:${Math.min(i++ * 18, 400)}ms">
-        <div class="shotcard__frame"><span class="frame-mark">${esc(shot.shot_size)} · ${esc(shot.angle)}</span></div>
-        <div class="shotcard__meta"><b>${esc(shot.id)}</b><span>${shot.duration.toFixed(1)}s</span></div>
+        <div class="shotcard__frame" data-detail="shot:${esc(shot.id)}">${shotImg ? `<img src="${esc(shotImg)}" alt="" loading="lazy" />` : `<span class="frame-cta">生成预览</span>`}<span class="frame-mark">${esc(shot.shot_size)} · ${esc(shot.angle)}</span></div>
+        <div class="shotcard__meta"><b>${esc(displayId(shot))}</b><span>${shot.duration.toFixed(1)}s</span></div>
         <div class="shotcard__body">
           <p>${esc(shot.visual)}</p>
           ${dlg ? `<div class="shotcard__dlg">${dlg}</div>` : ''}
@@ -211,7 +363,9 @@ function cardsHTML() {
 }
 
 // 编辑后刷新周边，但不重建表格（否则输入焦点会丢）
-function afterEdit() {
+// dirtyBible：改的是设定卡，下一次拆解直接拿它当约束
+function afterEdit(dirtyBible = false) {
+  if (dirtyBible) state.bibleDirty = true;
   recompute();
   renderStats();
   renderBadge();
@@ -225,8 +379,12 @@ function refreshRowWarn() {
 }
 
 function bindBoardEvents() {
-  // 点一行 = 选中该镜头（供「统一」面板挂道具用）
+  // 点一行 = 选中该镜头（供「统一」面板挂道具用）；双击 = 进二级页面出图
   $$('#boardBody tr.shot').forEach((tr) => {
+    tr.addEventListener('dblclick', (e) => {
+      if (e.target.closest('input, select, [contenteditable], button')) return;
+      openDetail(`shot:${tr.dataset.shot}`);
+    });
     tr.addEventListener('click', (e) => {
       if (e.target.closest('input, select, [contenteditable], button')) return;
       state.selectedShot = tr.dataset.shot;
@@ -294,6 +452,7 @@ function bibleHTML() {
   for (const c of b.characters) {
     h += `<div class="card">
       <div class="ent__head"><span class="ent__id">${esc(c.id)}</span><span class="ent__name">${esc(c.name)}</span><span class="ent__role">${esc(c.role)} · ${esc(c.age)}</span></div>
+      ${figHTML(`char:${c.id}`)}
       <p class="card__line" contenteditable="true" data-char="${esc(c.id)}" data-field="appearance"><b>锚点</b>${esc(c.appearance)}</p>
       ${c.face ? `<p class="card__line"><b>面部</b>${esc(c.face)}</p>` : ''}
       <div class="card__voice">${['gender', 'age_feel', 'timbre', 'pace', 'emotion']
@@ -301,6 +460,15 @@ function bibleHTML() {
         .map((k) => `<span>${esc(c.voice[k])}</span>`)
         .join('')}</div>
       ${c.forbidden?.length ? `<div class="card__forbid">${c.forbidden.map((f) => `<em>禁 ${esc(f)}</em>`).join('')}</div>` : ''}
+      ${(c.outfits || [])
+        .map(
+          (o) => `<div class="card__outfit">
+            <div class="ent__head"><span class="ent__id">${esc(o.id)}</span><span class="ent__name">${esc(o.name)}</span></div>
+            ${figHTML(`outfit:${o.id}`)}
+            <p class="card__line" contenteditable="true" data-outfit="${esc(o.id)}">${esc(o.desc)}</p>
+          </div>`
+        )
+        .join('')}
     </div>`;
   }
   h += `</div>`;
@@ -308,7 +476,9 @@ function bibleHTML() {
   h += `<div class="ent"><div class="ent__head"><span class="ent__id">SCENE</span><span class="ent__name">场景</span></div>`;
   for (const s of b.scenes) {
     h += `<div class="card">
-      <div class="ent__head"><span class="ent__id">${esc(s.id)}</span><span class="ent__name">${esc(s.name)}</span><span class="ent__role">${esc(s.time)}</span></div>
+      <div class="ent__head"><span class="ent__id">${esc(s.id)}</span><span class="ent__name">${esc(s.name)}</span><span class="ent__role">${esc(s.time)}${s.weather ? ' · ' + esc(s.weather) : ''}</span></div>
+      ${figHTML(`scene:${s.id}`)}
+      ${s.place ? `<p class="card__line" contenteditable="true" data-scene="${esc(s.id)}"><b>空间</b>${esc(s.place)}</p>` : ''}
       <p class="card__line"><b>光线</b>${esc(s.light)}</p>
       <p class="card__line"><b>色调</b>${esc(s.palette)}</p>
     </div>`;
@@ -320,6 +490,7 @@ function bibleHTML() {
     for (const p of b.props) {
       h += `<div class="card">
         <div class="ent__head"><span class="ent__id">${esc(p.id)}</span><span class="ent__name">${esc(p.name)}</span></div>
+        ${figHTML(`prop:${p.id}`)}
         <p class="card__line"><b>外观</b>${esc(p.look)}</p>
         ${p.significance ? `<p class="card__line"><b>意义</b>${esc(p.significance)}</p>` : ''}
       </div>`;
@@ -414,7 +585,7 @@ function bindUnityEvents() {
       afterEdit();
       renderBoard();
       renderInspector();
-      toast(`${shot.id} 已改用这套服装`);
+      toast(`${displayId(shot)} 已改用这套服装`);
     });
   });
 
@@ -428,7 +599,7 @@ function bindUnityEvents() {
       shot.props.push(id);
       afterEdit();
       renderInspector();
-      toast(`已把 ${id} 加到 ${shot.id}`);
+      toast(`已把 ${id} 加到 ${displayId(shot)}`);
     });
   });
 }
@@ -443,7 +614,31 @@ function bindBibleEvents() {
       const c = state.data.bible.characters.find((x) => x.id === el.dataset.char);
       if (!c) return;
       c.appearance = el.textContent.trim();
-      afterEdit();
+      afterEdit(true);
+    });
+  });
+
+  // 服装描述：改完就是下次出图 / 重生成的新约束
+  $$('#inspectorBody [contenteditable][data-outfit]').forEach((el) => {
+    el.addEventListener('blur', () => {
+      for (const c of state.data.bible.characters) {
+        const o = (c.outfits || []).find((x) => x.id === el.dataset.outfit);
+        if (o) {
+          o.desc = el.textContent.trim();
+          afterEdit(true);
+          return;
+        }
+      }
+    });
+  });
+
+  // 场景空间描述
+  $$('#inspectorBody [contenteditable][data-scene]').forEach((el) => {
+    el.addEventListener('blur', () => {
+      const s = state.data.bible.scenes.find((x) => x.id === el.dataset.scene);
+      if (!s) return;
+      s.place = el.textContent.trim();
+      afterEdit(true);
     });
   });
 }
@@ -518,7 +713,7 @@ function readOptions() {
 }
 
 // 统一的 POST：带超时，超过就明确报错，而不是一直转圈
-async function postJson(url, body, timeoutMs = 150000) {
+async function postJson(url, body, timeoutMs = 300000) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -533,7 +728,7 @@ async function postJson(url, body, timeoutMs = 150000) {
     return j;
   } catch (err) {
     if (err.name === 'AbortError') {
-      throw Object.assign(new Error(`超过 ${timeoutMs / 1000} 秒没有响应，模型可能过载`), { code: 'TIMEOUT' });
+      throw Object.assign(new Error(`超过 ${timeoutMs / 1000} 秒没有响应，请稍后重试`), { code: 'TIMEOUT' });
     }
     throw err;
   } finally {
@@ -563,28 +758,35 @@ async function generate() {
   setStatus('is-busy', '正在拆解 · 0s');
 
   try {
-    const d1 = await postJson('/api/bible', { script, notes });
+    // 设定卡被手动改过：不再重新抽取，直接拿改过的卡当约束重拆
+    const reuseBible = state.data?.bible && state.bibleDirty;
+    const d1 = reuseBible
+      ? { bible: state.data.bible, ms: 0 }
+      : await postJson('/api/bible', { script, notes });
+    if (reuseBible) toast('已按修改后的设定卡重新拆解');
 
     step('shots');
     const d2 = await postJson('/api/shots', { script, bible: d1.bible, options: state.options, notes });
 
     const count = (d2.scenes || []).reduce((n, s) => n + s.shots.length, 0);
-    if (!count) throw new Error('模型没有拆出任何镜头，换个剧本片段试试');
+    if (!count) throw new Error('没有拆出镜头，请换一段剧本重试');
 
     state.data = { bible: d1.bible, scenes: d2.scenes, timing: { bible: d1.ms, shots: d2.ms } };
+    state.bibleDirty = false;
     state.demo = false;
     state.loading = false;
     $('#demoNote').hidden = true;
     step('done');
     recompute();
     render();
+    epSaveCurrent();
     const total = summarize(flatShots(), state.warnings).total;
-    setStatus('', `模型 · ${total.toFixed(1)}s`);
-    toast(`完成：${count} 镜 / ${total.toFixed(1)} 秒 · 用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    setStatus('', `${total.toFixed(1)} 秒`);
+    toast(`完成：${count} 镜 / ${total.toFixed(1)} 秒 · 用时 ${((Date.now() - t0) / 1000).toFixed(1)} 秒`);
   } catch (err) {
     state.loading = false;
     if (err.code === 'NO_KEY') {
-      loadDemo('未配置 API Key，已载入内置示例');
+      loadDemo('未配置密钥，已载入内置示例');
       return;
     }
     render();
@@ -640,7 +842,7 @@ async function revise() {
     render();
     $('#feedback').value = '';
     const st = summarize(flatShots(), state.warnings);
-    setStatus('', `模型 · ${st.total.toFixed(1)}s`);
+    setStatus('', `${st.total.toFixed(1)} 秒`);
     toast(`已按意见重做：${st.shots} 镜 / ${st.total.toFixed(1)} 秒`);
   } catch (err) {
     state.loading = false;
@@ -738,8 +940,348 @@ function exportJson() {
   toast('已导出 JSON（可直接喂给图生视频 / TTS）');
 }
 
+// 真正的 .docx：自己拼 OOXML 再打 zip，不依赖库
+function exportDocx() {
+  if (!state.data) return;
+  const langLabel = state.options.subLang ? state.options.subLang.slice(0, 2) : 'EN';
+  const ep = String(state.episode || '01').padStart(2, '0');
+  const scenes = state.data.scenes.map((sc) => ({
+    ...sc,
+    shots: sc.shots.map((s) => ({ ...s, id: displayId(s) })),
+  }));
+  const bytes = buildStoryboardDocx({
+    title: '分镜本 · ' + (state.data.bible.title || '未命名'),
+    subtitle: `ep${ep}${state.episodeName ? ' ' + state.episodeName : ''} · ${new Date().toLocaleDateString('zh-CN')} · ${flatShots().length} 个镜头 · ${state.options.style || ''}`,
+    scenes,
+    bible: state.data.bible,
+    langLabel,
+  });
+  download(
+    `分镜本_${Date.now()}.docx`,
+    bytes,
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  );
+  toast('已导出 Word 分镜本（.docx）');
+}
+
+// ---------------------------------------------------------------- 读剧本文件
+// 只认 .txt 和 .docx；docx 的解析放在 docx.js（node 下也能直接测）。
+const MAX_FILE_MB = 2;
+
+async function loadScriptFile(file) {
+  const name = file.name || '';
+  const lower = name.toLowerCase();
+  if (file.size > MAX_FILE_MB * 1024 * 1024) {
+    toast(`文件偏大（${(file.size / 1048576).toFixed(1)} MB），先切一段再传`);
+    return;
+  }
+  try {
+    let text;
+    if (lower.endsWith('.txt')) {
+      text = await file.text();
+    } else if (lower.endsWith('.docx')) {
+      text = await docxToText(await file.arrayBuffer());
+    } else if (lower.endsWith('.doc')) {
+      throw new Error('老版 .doc 读不了，用 Word / WPS 另存成 .docx');
+    } else {
+      throw new Error('只支持 .docx 和 .txt');
+    }
+    text = (text || '').replace(/\r\n/g, '\n').trim();
+    if (!text) throw new Error('没读到文字，可能是扫描件或空文档');
+
+    $('#script').value = text;
+    $('#scriptCount').textContent = `${text.length} 字`;
+    $('#fileName').textContent = name;
+    $('#fileMeta').textContent = `${Math.max(1, Math.round(file.size / 1024))} KB · ${text.length} 字`;
+    $('#fileChip').hidden = false;
+    toast(`已读入 ${name}（${text.length} 字）`);
+  } catch (err) {
+    toast('读文件失败：' + err.message);
+  }
+}
+
+// 载入示例：剧本 + 该示例自带的导演意见（有些示例靠这句话把镜头压到预算内）
+function applySample(s) {
+  if (!s) return;
+  $('#script').value = s.text;
+  $('#scriptCount').textContent = `${s.text.length} 字`;
+  $('#fileChip').hidden = true;
+  $('#notes').value = s.notes || '';
+  $('#notesBox').open = Boolean(s.notes);
+}
+
+// ---------------------------------------------------------------- 二级页面：详情与出图
+const KIND_LABEL = { shot: '镜头', char: '人物', outfit: '服装', scene: '场景', prop: '道具' };
+
+function findEntity(kind, id) {
+  const b = state.data?.bible || {};
+  if (kind === 'shot') return flatShots().find((s) => s.id === id) || null;
+  if (kind === 'char') return (b.characters || []).find((c) => c.id === id) || null;
+  if (kind === 'scene') return (b.scenes || []).find((s) => s.id === id) || null;
+  if (kind === 'prop') return (b.props || []).find((p) => p.id === id) || null;
+  if (kind === 'outfit') {
+    for (const c of b.characters || []) {
+      const o = (c.outfits || []).find((x) => x.id === id);
+      if (o) return { ...o, owner: c };
+    }
+  }
+  return null;
+}
+
+// 设定卡 / 镜头的画面提示词：镜头用规则引擎拼好的那句，设定卡按卡片字段拼
+function promptFor(kind, id) {
+  const o = state.options || {};
+  const style = o.style || '电影感写实';
+  const head = `${style}，泰国漫剧视觉设定`;
+  const e = findEntity(kind, id);
+  if (!e) return '';
+
+  if (kind === 'shot') return e._prompt || '';
+  if (kind === 'char') {
+    const outfit = (e.outfits || [])[0];
+    return [
+      `${head}，角色三视图设定图：同一个人物并排三个角度——正面全身、四分之三侧面全身、正侧面全身，三个角度等高并列，纯浅灰背景，无文字、无边框、无标签。`,
+      `人物：${e.name}，${e.age || ''}。外貌：${e.appearance}。`,
+      e.face ? `面部：${e.face}。` : '',
+      `服装：${outfit ? outfit.desc : '日常便装'}。`,
+      `三个角度必须画成同一个人：脸型、五官、发型、疤、服装细节完全一致；不要换装，不要出现第二个角色。`,
+      e.forbidden?.length ? `不要出现：${e.forbidden.join('、')}。` : '',
+    ].filter(Boolean).join('\n');
+  }
+  if (kind === 'outfit') {
+    return [
+      `${head}，服装三视图设定图：同一套衣服并排三个视图——正面平铺、背面平铺、面料与刺绣细节特写，纯浅灰背景，无文字。`,
+      `这套衣服：${e.name}。${e.desc}`,
+      `三个视图必须是同一套衣服：版型、面料、颜色、纹样、扣子、磨损细节完全一致。`,
+      `画面里不要出现人脸、五官、头颅、真人模特、手部特写，也不要出现品牌 logo 和文字。`,
+    ].join('\n');
+  }
+  if (kind === 'scene') {
+    return [
+      `${head}，场景多角度设定图：同一个空间的三个视角并排——全景主视角、反打视角（从相反方向看）、以及一个关键陈设的特写。`,
+      `地点：${e.name}。时间：${e.time || ''}，天气：${e.weather || ''}。`,
+      e.place ? `空间与陈设：${e.place}` : '',
+      e.light ? `光线：${e.light}` : '',
+      e.palette ? `色调：${e.palette}` : '',
+      `三个视角必须是同一个空间：墙、地面、家具位置、光源方向都要对得上，不能画成三个不同的地方。画面里不要出现人物。`,
+    ].filter(Boolean).join('\n');
+  }
+  if (kind === 'prop') {
+    return [
+      `${head}，道具四视图设定图：同一件东西并排四个视图——正面、侧面、俯视、细节特写，纯浅灰背景，无文字。`,
+      `${e.name}：${e.look || ''}`,
+      e.significance ? `用途：${e.significance}` : '',
+      `四个视图必须是同一件东西：尺寸比例、颜色、缺口和磨损位置完全一致。`,
+    ].filter(Boolean).join('\n');
+  }
+  return '';
+}
+
+function figHTML(key) {
+  const url = state.images[key];
+  const inner = url ? `<img src="${esc(url)}" alt="" loading="lazy" />` : `<span>生成参考图</span>`;
+  return `<div class="card__fig" data-detail="${esc(key)}">${inner}</div>`;
+}
+
+// 这个镜头能当参照图的设定卡：人物 → 场景 → 本镜穿的那套服装 → 道具（最多 3 张，够用又不至于拖慢出图）
+function refItemsFor(shot) {
+  const b = state.data.bible;
+  const items = [];
+  const chars = (shot.characters || [])
+    .map((cid) => (b.characters || []).find((x) => x.id === cid))
+    .filter(Boolean)
+    .slice(0, 2);
+
+  // 人物图里已经穿着默认那套衣服，所以人物图优先占位
+  for (const c of chars) {
+    items.push({ key: `char:${c.id}`, label: c.name, url: state.images[`char:${c.id}`] || '' });
+  }
+
+  const sc = (b.scenes || []).find((s) => s.id === shot.scene_id);
+  if (sc) items.push({ key: `scene:${sc.id}`, label: sc.name, url: state.images[`scene:${sc.id}`] || '' });
+
+  // 本镜如果穿了非默认的那套，把服装图也带上（服装图无脸，只当衣料样式参照）
+  for (const c of chars) {
+    const oid = (shot.outfits || {})[c.id];
+    const isDefault = !oid || oid === (c.outfits || [])[0]?.id;
+    if (isDefault) continue;
+    const o = (c.outfits || []).find((x) => x.id === oid);
+    if (o && state.images[`outfit:${o.id}`]) {
+      items.push({ key: `outfit:${o.id}`, label: o.name, url: state.images[`outfit:${o.id}`] });
+      break;
+    }
+  }
+
+  for (const pid of shot.props || []) {
+    const p = (b.props || []).find((x) => x.id === pid);
+    if (p) items.push({ key: `prop:${p.id}`, label: p.name, url: state.images[`prop:${p.id}`] || '' });
+  }
+  return items.slice(0, 3);
+}
+
+// 镜头页底部那排参照图：有图的当锚点，没图的点一下跳去生成
+function renderRefs() {
+  const box = $('#detailRefs');
+  if (state.detailKind !== 'shot' || !state.detailKey) {
+    box.hidden = true;
+    box.innerHTML = '';
+    state.detailRefs = [];
+    return;
+  }
+  const shot = findEntity('shot', state.detailKey.split(':')[1]);
+  const items = shot ? refItemsFor(shot) : [];
+  if (!items.length) {
+    box.hidden = true;
+    box.innerHTML = '';
+    state.detailRefs = [];
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML =
+    '<span class="detail__refs__label">参照图</span>' +
+    items
+      .map(
+        (it) =>
+          `<span class="refchip ${it.url ? '' : 'is-missing'}" data-detail="${esc(it.key)}" title="${
+            it.url ? '带着这张图出图，点它去改' : '还没出图，点我先去生成'
+          }">${it.url ? `<img src="${esc(it.url)}" alt="" />` : '＋'}${esc(it.label)}</span>`
+      )
+      .join('');
+  state.detailRefs = items.filter((i) => i.url).map((i) => i.url);
+}
+
+function renderDetailFig() {
+  const key = state.detailKey;
+  const url = key ? state.images[key] : '';
+  $('#detailFig').innerHTML = url
+    ? `<img src="${esc(url)}" alt="" />`
+    : `<span class="detail__empty">还没有图，点下面的「生成预览」</span>`;
+}
+
+function openDetail(key) {
+  if (!state.data) return;
+  const [kind, id] = String(key).split(':');
+  const e = findEntity(kind, id);
+  if (!e) return toast('找不到这一条');
+  state.detailKey = key;
+  state.detailKind = kind;
+  $('#detailKind').textContent = KIND_LABEL[kind] || kind;
+  const name = kind === 'outfit' ? `${e.name}（${e.owner.name}）` : e.name || '';
+  $('#detailTitle').textContent = `${id}${name ? ' · ' + name : ''}`;
+  $('#detailPrompt').value = state.promptEdits[key] || promptFor(kind, id);
+  $('#detailRevise').value = '';
+  $('#detailTip').textContent =
+    kind === 'outfit'
+      ? '服装设定图仅呈现服装，人物长相见对应人物卡。多视图出图约 60–90 秒。'
+      : '多视图出图约 60–90 秒。';
+  renderDetailFig();
+  renderRefs();
+  $('#detail').hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+function closeDetail() {
+  $('#detail').hidden = true;
+  document.body.style.overflow = '';
+  state.detailKey = null;
+  state.detailKind = null;
+  state.detailRefs = [];
+}
+
+async function generateDetailImage() {
+  const key = state.detailKey;
+  if (!key) return;
+  const prompt = $('#detailPrompt').value.trim();
+  if (!prompt) return toast('先写提示词');
+  const btn = $('#detailGen');
+  if (btn.disabled) return;
+
+  btn.disabled = true;
+  btn.textContent = '生成中…';
+  $('#detailTip').textContent = state.detailRefs.length
+    ? `正在生成：使用 ${state.detailRefs.length} 张参照图，约 40–60 秒。`
+    : '正在生成，多视图约 60–90 秒。';
+  try {
+    const d = await postJson(
+      '/api/image',
+      {
+        prompt,
+        revise: $('#detailRevise').value.trim(),
+        aspect: state.options.aspect || '9:16',
+        refs: state.detailRefs,
+      },
+      420000
+    );
+    state.images[key] = d.url;
+    if (d.rewritten && d.prompt) {
+      state.promptEdits[key] = d.prompt;
+      $('#detailPrompt').value = d.prompt;
+      $('#detailRevise').value = '';
+    }
+    saveStore();
+    renderDetailFig();
+    render();
+    toast(
+      `${d.rewritten ? '已按建议更新提示词并生成' : '生成完成'} · 用时 ${Math.round(d.ms / 1000)} 秒${
+        Array.isArray(d.refs) && d.refs.length ? ` · 参照图 ${d.refs.length} 张` : ''
+      }`
+    );
+  } catch (err) {
+    toast('生成失败：' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '生成预览';
+    $('#detailTip').textContent =
+      state.detailKind === 'outfit'
+        ? '服装设定图仅呈现服装，人物长相见对应人物卡。多视图出图约 60–90 秒。'
+        : '多视图出图约 60–90 秒。';
+  }
+}
+
 // ---------------------------------------------------------------- 初始化
 function init() {
+  loadStore();
+  initEpisodes();
+
+  // 分集：切换 / 新建 / 改集号集名
+  $('#epSelect').addEventListener('change', (e) => {
+    epSaveCurrent();
+    epLoad(e.target.value);
+  });
+  $('#btnEpNew').addEventListener('click', () => {
+    epSaveCurrent();
+    const nextNo = String(state.episodes.length + 1).padStart(2, '0');
+    const ep = { id: 'e' + Date.now(), no: nextNo, name: '', script: '', notes: '', data: null };
+    state.episodes.push(ep);
+    epLoad(ep.id);
+    $('#script').focus();
+    toast(`已新建 ep${nextNo}，贴剧本再点拆解`);
+  });
+  ['epNo', 'epName'].forEach((id) => {
+    $('#' + id).addEventListener('input', () => {
+      state.episode = ($('#epNo').value || '01').trim() || '01';
+      state.episodeName = $('#epName').value.trim();
+      epRenderSelect();
+      renderBoard();
+    });
+  });
+
+  // 二级页面：卡片 / 行 → 详情与出图
+  $('#detailClose').addEventListener('click', closeDetail);
+  $('#detail').addEventListener('click', (e) => {
+    if (e.target.dataset.close) closeDetail();
+  });
+  $('#detailGen').addEventListener('click', generateDetailImage);
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-detail]');
+    if (!el) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openDetail(el.dataset.detail);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('#detail').hidden) closeDetail();
+  });
   $('#samples').innerHTML = SAMPLES.map(
     (s) => `<button class="chip" data-sample="${s.id}" title="${esc(s.tag)}">${esc(s.name)}</button>`
   ).join('');
@@ -747,8 +1289,7 @@ function init() {
   $$('#samples .chip').forEach((btn) => {
     btn.addEventListener('click', () => {
       const s = SAMPLES.find((x) => x.id === btn.dataset.sample);
-      $('#script').value = s.text;
-      $('#scriptCount').textContent = `${s.text.length} 字`;
+      applySample(s);
       $('#script').focus();
     });
   });
@@ -768,6 +1309,36 @@ function init() {
     });
   });
 
+  // 上传文件（主入口）+ 拖拽
+  const uploader = $('#uploader');
+  const fileInput = $('#fileInput');
+  const pickFile = () => fileInput.click();
+
+  uploader.addEventListener('click', pickFile);
+  uploader.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickFile(); }
+  });
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files && fileInput.files[0];
+    if (f) loadScriptFile(f);
+    fileInput.value = '';
+  });
+  ['dragenter', 'dragover'].forEach((t) =>
+    uploader.addEventListener(t, (e) => { e.preventDefault(); uploader.classList.add('is-over'); })
+  );
+  ['dragleave', 'drop'].forEach((t) =>
+    uploader.addEventListener(t, (e) => { e.preventDefault(); uploader.classList.remove('is-over'); })
+  );
+  uploader.addEventListener('drop', (e) => {
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) loadScriptFile(f);
+  });
+  $('#btnClearFile').addEventListener('click', () => {
+    $('#fileChip').hidden = true;
+    $('#script').value = '';
+    $('#scriptCount').textContent = '0 字';
+  });
+
   $('#script').addEventListener('input', (e) => {
     $('#scriptCount').textContent = `${e.target.value.length} 字`;
   });
@@ -776,9 +1347,7 @@ function init() {
   $('#btnRevise').addEventListener('click', revise);
 
   $('#btnTrySample').addEventListener('click', () => {
-    const s = SAMPLES[0];
-    $('#script').value = s.text;
-    $('#scriptCount').textContent = `${s.text.length} 字`;
+    applySample(SAMPLES[0]);
     generate();
   });
 
@@ -808,6 +1377,7 @@ function init() {
   $('#btnExportCsv').addEventListener('click', exportCsv);
   $('#btnExportXls').addEventListener('click', exportXls);
   $('#btnExportJson').addEventListener('click', exportJson);
+  $('#btnExportDocx').addEventListener('click', exportDocx);
   $('#btnPrint').addEventListener('click', () => window.print());
 
   // 打印只能打表格，卡片视图先切回来
@@ -828,7 +1398,7 @@ function init() {
     .then((r) => r.json())
     .then((h) => {
       if (h.hasKey) {
-        setStatus('', `模型 · ${h.model}`);
+        setStatus('', '就绪');
       } else {
         loadDemo();
       }

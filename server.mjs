@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BIBLE_SYSTEM, SHOTS_SYSTEM, REVISE_SYSTEM, buildBibleUser, buildShotsUser, buildReviseUser, ENUMS } from './prompts.mjs';
@@ -22,20 +23,34 @@ function loadEnv() {
 }
 loadEnv();
 
-const API_KEY = process.env.DEEPSEEK_API_KEY || process.env.ZHIPU_API_KEY || process.env.LLM_API_KEY || '';
-const BASE_URL =
-  process.env.LLM_BASE_URL ||
-  (process.env.DEEPSEEK_API_KEY
-    ? 'https://api.deepseek.com/chat/completions'
-    : 'https://open.bigmodel.cn/api/paas/v4/chat/completions');
-const MODEL = process.env.LLM_MODEL || (process.env.DEEPSEEK_API_KEY ? 'deepseek-chat' : 'glm-4-flash');
+// LLM_API_KEY 一旦填了，就走中转站那套（GPT）；没填就退回 DeepSeek，界面照常能演示
+const GPT_MODE = Boolean(process.env.LLM_API_KEY);
+const API_KEY = process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY || process.env.ZHIPU_API_KEY || '';
+const RAW_BASE = GPT_MODE
+  ? process.env.LLM_BASE_URL || 'https://api.openai-next.com/v1'
+  : process.env.DEEPSEEK_API_KEY
+    ? 'https://api.deepseek.com'
+    : 'https://open.bigmodel.cn/api/paas/v4';
+// .env 里写成 .../v1 或 .../v1/chat/completions 都认
+const BASE_ROOT = RAW_BASE.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
+const CHAT_URL = `${BASE_ROOT}/chat/completions`;
+const MODELS_URL = `${BASE_ROOT}/models`;
+const MODEL =
+  (GPT_MODE && process.env.LLM_MODEL) ||
+  (GPT_MODE ? 'gpt-5.6-sol' : process.env.DEEPSEEK_API_KEY ? 'deepseek-chat' : 'glm-4-flash');
+// 图片模型（设定卡参考图 / 镜头预览图）
+const IMAGE_MODEL = process.env.IMAGE_MODEL || 'gpt-image-2';
+// 中转站前面挡着 Cloudflare，单次请求超过 100 秒会被掐（524）。medium 比默认快一半左右。
+const IMAGE_QUALITY = process.env.IMAGE_QUALITY || 'medium';
+const THUMBS = join(PUBLIC, 'thumbs');
+const IMAGE_SIZES = { '9:16': '1024x1536', '16:9': '1536x1024', '1:1': '1024x1024' };
 
 // ---------- 模型调用 ----------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 网络抖动重试 2 次；401/400 这类确定性错误不重试
 async function callModel(messages, opts = {}) {
-  if (!API_KEY) throw Object.assign(new Error('未配置 API Key'), { code: 'NO_KEY' });
+  if (!API_KEY) throw Object.assign(new Error('未配置密钥'), { code: 'NO_KEY' });
   let lastErr;
   for (let i = 0; i < 3; i++) {
     try {
@@ -50,25 +65,21 @@ async function callModel(messages, opts = {}) {
   throw lastErr;
 }
 
-async function callModelOnce(messages, { temperature = 0.6, maxTokens = 8000 } = {}) {
-  if (!API_KEY) throw Object.assign(new Error('未配置 API Key'), { code: 'NO_KEY' });
+async function callModelOnce(messages, { temperature = 0.6, maxTokens = 8000, json = true } = {}) {
+  if (!API_KEY) throw Object.assign(new Error('未配置密钥'), { code: 'NO_KEY' });
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 120000);
   try {
-    const res = await fetch(BASE_URL, {
+    const body = { model: MODEL, messages, temperature, max_tokens: maxTokens };
+    if (json) body.response_format = { type: 'json_object' };
+    const res = await fetch(CHAT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
-      body: JSON.stringify({
-        model: MODEL,
-        messages,
-        temperature,
-        max_tokens: maxTokens,
-        response_format: { type: 'json_object' },
-      }),
+      body: JSON.stringify(body),
       signal: ctrl.signal,
     });
     const text = await res.text();
-    if (!res.ok) throw new Error(`模型返回 ${res.status}: ${text.slice(0, 300)}`);
+    if (!res.ok) throw new Error(`请求失败（${res.status}）：${text.slice(0, 300)}`);
     const data = JSON.parse(text);
     return data.choices?.[0]?.message?.content ?? '';
   } finally {
@@ -133,6 +144,7 @@ function normalizeBible(b) {
     return {
       id,
       name: c.name || `角色${i + 1}`,
+      name_en: c.name_en || '',
       role: c.role || '配角',
       age: c.age || '',
       appearance: c.appearance || '',
@@ -146,6 +158,7 @@ function normalizeBible(b) {
   const scenes = (b.scenes || []).map((s, i) => ({
     id: uniqueId(s.id || `S${i + 1}`, usedS),
     name: s.name || `场景${i + 1}`,
+    name_en: s.name_en || '',
     time: s.time || '',
     weather: s.weather || '',
     place: s.place || '',
@@ -156,6 +169,7 @@ function normalizeBible(b) {
   const props = (b.props || []).map((p, i) => ({
     id: uniqueId(p.id || `P${i + 1}`, usedP),
     name: p.name || `道具${i + 1}`,
+    name_en: p.name_en || '',
     owner: p.owner || '',
     look: p.look || '',
     significance: p.significance || '',
@@ -206,6 +220,7 @@ function normalizeShots(raw, bible) {
         })),
       sfx: s.sfx || '',
       emotion: s.emotion || '',
+      continuity: s.continuity || '',
       locked: false,
     }));
     return { scene_id: sceneId, summary: sc.summary || '', mood: sc.mood || '', shots };
@@ -244,7 +259,174 @@ const server = createServer(async (req, res) => {
 
   try {
     if (url.pathname === '/api/health') {
-      return send(res, 200, { ok: true, hasKey: Boolean(API_KEY), model: API_KEY ? MODEL : null });
+      return send(res, 200, {
+        ok: true,
+        hasKey: Boolean(API_KEY),
+        model: API_KEY ? MODEL : null,
+        base: BASE_ROOT,
+        imageModel: IMAGE_MODEL || null,
+      });
+    }
+
+    // 自检：列出这个 key 到底能用哪些模型（换中转站后先跑这个，别猜模型名）
+    if (url.pathname === '/api/models') {
+      if (!API_KEY) return send(res, 200, { ok: false, error: '未配置密钥' });
+      try {
+        const r = await fetch(MODELS_URL, { headers: { Authorization: `Bearer ${API_KEY}` } });
+        const t = await r.text();
+        if (!r.ok) return send(res, 200, { ok: false, status: r.status, error: t.slice(0, 400) });
+        let data;
+        try {
+          data = JSON.parse(t);
+        } catch {
+          return send(res, 200, { ok: false, error: '返回的不是 JSON：' + t.slice(0, 200) });
+        }
+        const ids = (data.data || data.models || [])
+          .map((m) => (typeof m === 'string' ? m : m.id || m.name))
+          .filter(Boolean)
+          .sort();
+        return send(res, 200, {
+          ok: true,
+          base: BASE_ROOT,
+          current: MODEL,
+          imageModel: IMAGE_MODEL || null,
+          count: ids.length,
+          ids,
+        });
+      } catch (err) {
+        return send(res, 200, { ok: false, error: String(err.message || err) });
+      }
+    }
+
+    // 出图：设定卡参考图 / 镜头预览图（走同一个图片模型，结果落盘缓存）
+    if (url.pathname === '/api/image' && req.method === 'POST') {
+      const { prompt, revise, aspect, refs } = await readBody(req);
+      if (!prompt || !String(prompt).trim()) return send(res, 400, { error: '缺少画面提示词' });
+
+      const t0 = Date.now();
+      let finalPrompt = String(prompt).trim();
+      let rewritten = false;
+
+      // 「建议修改」：先让文本模型把提示词改写一遍，而不是硬拼在末尾
+      const advice = (revise || '').trim();
+      if (advice) {
+        const sys =
+          '你是分镜画面提示词编辑。用户会对现有画面提示词提出修改要求，你输出改写后的提示词。' +
+          '规则：只输出改写后的提示词本身，不要解释、不要引号、不要 markdown；' +
+          '保留原提示词里没有被要求改的部分；新要求与原文冲突时以新要求为准，并删掉冲突的描述；长度不超过原文 1.3 倍。';
+        try {
+          const out = await callModel(
+            [
+              { role: 'system', content: sys },
+              { role: 'user', content: `原提示词：\n${finalPrompt}\n\n修改要求：\n${advice}\n\n只输出改写后的提示词。` },
+            ],
+            { temperature: 0.4, maxTokens: 800, json: false }
+          );
+          const cleaned = String(out || '').trim().replace(/^[,:"'「]|[,:"'」]$/g, '').trim();
+          if (cleaned) {
+            finalPrompt = cleaned;
+            rewritten = true;
+          }
+        } catch {
+          /* 改写失败就直接按原提示词出图，不卡住流程 */
+        }
+      }
+
+      const size = IMAGE_SIZES[aspect] || IMAGE_SIZES['9:16'];
+
+      // 参照图：只认自己生成过的缩略图，最多 4 张（人物/服装/场景/道具）
+      const refFiles = (Array.isArray(refs) ? refs : [])
+        .map((r) => String(r || '').replace(/^\/thumbs\//, '').replace(/^thumbs\//, ''))
+        .filter((n) => /^img-[a-f0-9]{6,}\.png$/.test(n))
+        .filter((n) => existsSync(join(THUMBS, n)))
+        .slice(0, 3);
+
+      const hash = createHash('sha1')
+        .update(`${IMAGE_MODEL}|${size}|${refFiles.join(',')}|${finalPrompt}`)
+        .digest('hex')
+        .slice(0, 12);
+      const name = `img-${hash}.png`;
+      const file = join(THUMBS, name);
+      const cached = existsSync(file);
+
+      if (!cached) {
+        if (!API_KEY) throw Object.assign(new Error('未配置密钥'), { code: 'NO_KEY' });
+        const genPrompt = refFiles.length
+          ? `${finalPrompt}\n\n（参考图约束：严格沿用参考图里的人物长相、发型、服装、场景陈设与道具外观，不要改成别的样子；只按上面的画面要求重新构图和打光。）`
+          : finalPrompt;
+
+        // 中转站前面挡着 Cloudflare，单次请求超过 100 秒会回 524（一个 HTML 错误页）。
+        // 遇到 5xx / 429 就重试，通常第二次能过。
+        let text = '';
+        let data = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          let r;
+          if (refFiles.length) {
+            const fd = new FormData();
+            fd.append('model', IMAGE_MODEL);
+            fd.append('prompt', genPrompt);
+            fd.append('size', size);
+            fd.append('n', '1');
+            fd.append('quality', IMAGE_QUALITY);
+            for (let i = 0; i < refFiles.length; i++) {
+              const b = await readFile(join(THUMBS, refFiles[i]));
+              fd.append('image', new Blob([b], { type: 'image/png' }), `ref${i + 1}.png`);
+            }
+            r = await fetch(`${BASE_ROOT}/images/edits`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${API_KEY}` },
+              body: fd,
+              signal: AbortSignal.timeout(150000),
+            });
+          } else {
+            r = await fetch(`${BASE_ROOT}/images/generations`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+              body: JSON.stringify({ model: IMAGE_MODEL, prompt: genPrompt, size, n: 1, quality: IMAGE_QUALITY }),
+              signal: AbortSignal.timeout(150000),
+            });
+          }
+
+          text = await r.text();
+          if (r.ok) {
+            try {
+              data = JSON.parse(text);
+            } catch {
+              throw new Error('出图接口返回异常：' + text.slice(0, 200));
+            }
+            break;
+          }
+          const retriable = [429, 502, 503, 504, 524].includes(r.status);
+          if (!retriable || attempt === 2) throw new Error(`出图失败（${r.status}）：${text.slice(0, 200)}`);
+          console.warn(`[image] ${r.status}，第 ${attempt + 1} 次重试`);
+          await sleep(1200 * (attempt + 1));
+        }
+        if (!data) throw new Error('出图失败：多次重试后仍未返回结果');
+        const item = data.data?.[0] || {};
+        let buf;
+        if (item.b64_json) buf = Buffer.from(item.b64_json, 'base64');
+        else if (item.url) {
+          const ir = await fetch(item.url, { signal: AbortSignal.timeout(120000) });
+          if (!ir.ok) throw new Error(`图片下载失败 ${ir.status}`);
+          buf = Buffer.from(await ir.arrayBuffer());
+        } else {
+          throw new Error('出图接口未返回图片：' + JSON.stringify(data).slice(0, 200));
+        }
+        await mkdir(THUMBS, { recursive: true });
+        await writeFile(file, buf);
+      }
+
+      return send(res, 200, {
+        ok: true,
+        url: `/thumbs/${name}`,
+        prompt: finalPrompt,
+        rewritten,
+        cached,
+        model: IMAGE_MODEL,
+        size,
+        refs: refFiles,
+        ms: Date.now() - t0,
+      });
     }
 
     // 第一步：抽取设定卡（人物 / 场景 / 道具）
@@ -322,5 +504,7 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  分镜台 running →  http://127.0.0.1:${PORT}`);
-  console.log(`  模型：${API_KEY ? MODEL : '未配置（前端将进入演示模式）'}\n`);
+  console.log(`  模型：${API_KEY ? MODEL : '未配置（前端将进入演示模式）'}`);
+  console.log(`  地址：${BASE_ROOT}`);
+  console.log(`  自检：http://127.0.0.1:${PORT}/api/models  ← 换中转站后先看这里\n`);
 });

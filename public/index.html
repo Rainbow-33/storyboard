@@ -28,6 +28,7 @@
     <button class="btn btn--ghost" id="btnExportCsv" disabled>CSV</button>
     <button class="btn btn--ghost" id="btnExportXls" disabled>Excel</button>
     <button class="btn btn--ghost" id="btnExportJson" disabled>JSON</button>
+    <button class="btn btn--ghost" id="btnExportDocx" disabled>Word</button>
     <button class="btn btn--solid" id="btnPrint" disabled>打印分镜本</button>
   </nav>
 </header>
@@ -41,8 +42,31 @@
       <span class="hint" id="scriptCount">0 字</span>
     </div>
 
+    <div class="ep-bar">
+      <span class="ep-bar__label">分集</span>
+      <select id="epSelect" title="切换集"></select>
+      <input id="epNo" maxlength="3" value="01" title="集号，镜号前缀" />
+      <input id="epName" placeholder="集名" title="这一集叫什么" />
+      <button class="btn btn--ghost" id="btnEpNew" title="新建一集">＋</button>
+    </div>
+
+    <div class="uploader" id="uploader" role="button" tabindex="0" title="点击选择文件，或把文件拖到这里">
+      <span class="uploader__icon">↑</span>
+      <span class="uploader__title">上传剧本文件</span>
+      <span class="uploader__hint">.docx / .txt · 也可直接拖进来</span>
+      <input type="file" id="fileInput" accept=".docx,.txt,text/plain" hidden />
+    </div>
+
+    <div class="file-chip" id="fileChip" hidden>
+      <span id="fileName"></span>
+      <span class="file-chip__meta" id="fileMeta"></span>
+      <button class="file-chip__x" id="btnClearFile" title="移除">×</button>
+    </div>
+
+    <div class="or-row"><span>或直接粘贴文本</span></div>
+
     <textarea id="script" class="script-input" spellcheck="false"
-      placeholder="把剧本、小说片段或分镜草稿粘进来…&#10;&#10;例：&#10;深夜，便利店。林晚在收银台后打着哈欠。&#10;门铃响，周衍浑身湿透站在门口，手里攥着一只旧怀表。&#10;「还你。」他说。&#10;林晚没有接。"></textarea>
+      placeholder="把剧本片段粘在这里…"></textarea>
 
     <div class="samples-row">
       <span class="samples-row__label">没有剧本？载入</span>
@@ -79,6 +103,7 @@
           <option value="" selected>仅中文</option>
           <option value="泰语">中泰双语</option>
           <option value="英语">中英双语</option>
+          <option value="英语+泰语">中英泰三语</option>
           <option value="__custom">自定义…</option>
         </select>
         <input id="optLangCustom" class="field__custom" placeholder="例如：日语" hidden />
@@ -118,7 +143,7 @@
       <div class="progress__step" data-step="done"><i></i><span>校准时长与运镜</span></div>
     </div>
 
-    <p class="footnote" id="demoNote" hidden>演示模式：未配置 API Key，显示的是内置示例结果。</p>
+    <p class="footnote" id="demoNote" hidden>演示模式：未配置密钥，显示的是内置示例结果。</p>
   </aside>
 
   <!-- 中：分镜 -->
@@ -162,6 +187,31 @@
 </main>
 
 <div class="toast" id="toast" hidden></div>
+
+<!-- 二级页面：点卡片/行进来，看大图、改提示词、写建议修改、出图 -->
+<div class="detail" id="detail" hidden>
+  <div class="detail__mask" data-close="1"></div>
+  <section class="detail__panel" role="dialog" aria-modal="true">
+    <header class="detail__head">
+      <span class="detail__kind" id="detailKind"></span>
+      <h3 id="detailTitle">—</h3>
+      <button class="detail__x" id="detailClose" title="关闭">×</button>
+    </header>
+
+    <div class="detail__fig" id="detailFig"><span class="detail__empty">还没有图</span></div>
+
+    <div class="detail__refs" id="detailRefs" hidden></div>
+
+    <div class="detail__advice">
+      <input id="detailRevise" placeholder="建议修改：换成白天 / 表情再冷一点 / 镜头再低一点" />
+      <button class="btn btn--solid" id="detailGen">生成预览</button>
+    </div>
+    <p class="detail__tip" id="detailTip">多视图出图约 60–90 秒。</p>
+
+    <label class="detail__label" for="detailPrompt">画面提示词（可改，改完再点生成）</label>
+    <textarea id="detailPrompt" rows="7" spellcheck="false"></textarea>
+  </section>
+</div>
 
 <script type="module" src="/app.js"></script>
 </body>
