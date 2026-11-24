@@ -138,7 +138,7 @@
     </div>
 
     <div class="progress" id="progress" hidden>
-      <div class="progress__step" data-step="bible"><i></i><span>建立人物 / 场景 / 道具档案</span></div>
+      <div class="progress__step" data-step="bible"><i></i><span>建立角色 / 服装 / 场景 / 道具资产</span></div>
       <div class="progress__step" data-step="shots"><i></i><span>按场景拆解镜头</span></div>
       <div class="progress__step" data-step="done"><i></i><span>校准时长与运镜</span></div>
     </div>
@@ -175,12 +175,12 @@
   <!-- 右：检视器 -->
   <aside class="panel panel--inspector">
     <div class="tabs" id="tabs">
-      <button class="is-active" data-tab="bible">设定卡</button>
+      <button class="is-active" data-tab="bible">资产</button>
       <button data-tab="unity">统一</button>
       <button data-tab="check">一致性 <em id="warnBadge" hidden>0</em></button>
     </div>
     <div class="inspector__body" id="inspectorBody">
-      <p class="placeholder-note">生成后显示人物、场景、道具设定卡。</p>
+      <p class="placeholder-note">生成后显示角色、服装、场景、道具资产。</p>
     </div>
   </aside>
 
@@ -198,18 +198,25 @@
       <button class="detail__x" id="detailClose" title="关闭">×</button>
     </header>
 
-    <div class="detail__fig" id="detailFig"><span class="detail__empty">还没有图</span></div>
+    <div class="detail__grid">
+      <div class="detail__media">
+        <div class="detail__fig" id="detailFig"><span class="detail__empty">还没有图</span></div>
+        <div class="detail__refs" id="detailRefs" hidden></div>
+      </div>
 
-    <div class="detail__refs" id="detailRefs" hidden></div>
+      <div class="detail__side">
+        <div class="detail__fields" id="detailFields" hidden></div>
 
-    <div class="detail__advice">
-      <input id="detailRevise" placeholder="建议修改：换成白天 / 表情再冷一点 / 镜头再低一点" />
-      <button class="btn btn--solid" id="detailGen">生成预览</button>
+        <div class="detail__advice">
+          <input id="detailRevise" placeholder="建议修改：换成白天 / 表情再冷一点 / 镜头再低一点" />
+          <button class="btn btn--solid" id="detailGen">生成预览</button>
+        </div>
+        <p class="detail__tip" id="detailTip">多视图出图约 60–90 秒。</p>
+
+        <label class="detail__label" for="detailPrompt">画面提示词（可改，改完再点生成）</label>
+        <textarea id="detailPrompt" rows="6" spellcheck="false"></textarea>
+      </div>
     </div>
-    <p class="detail__tip" id="detailTip">多视图出图约 60–90 秒。</p>
-
-    <label class="detail__label" for="detailPrompt">画面提示词（可改，改完再点生成）</label>
-    <textarea id="detailPrompt" rows="7" spellcheck="false"></textarea>
   </section>
 </div>
 

@@ -25,7 +25,9 @@ const state = {
   episodeName: '',
   episodes: [],
   currentEpId: null,
-  bibleDirty: false, // 设定卡被手动改过 → 下次拆解直接拿它当约束
+  bibleDirty: false, // 资产（设定卡）被手动改过 → 下次拆解直接拿它当约束
+  assetFilter: 'all', // 资产空间筛选：all / char / outfit / scene / prop
+  creating: false,    // 资产空间里「新建」面板是否展开
 };
 
 const STORE_IMAGES = 'sb.images';
@@ -277,7 +279,7 @@ function tableHTML() {
       <col class="c-ent"><col class="c-note"><col class="c-dur">
     </colgroup>
     <thead><tr>
-      <th>镜头号</th><th>画面描述</th><th>中英双语台词</th><th>运镜方式 / 景别</th><th>人物 / 场景 / 道具</th><th>备注（音效 / 首帧）</th><th>建议时长</th>
+      <th>镜头号</th><th>画面描述</th><th>${esc(langMeta().header)}</th><th>运镜方式 / 景别</th><th>人物 / 场景 / 道具</th><th>备注（音效 / 首帧）</th><th>建议时长</th>
     </tr></thead>
     <tbody>${rows}</tbody></table></div>`;
 }
@@ -294,6 +296,26 @@ function displayId(shot) {
   const ep = String(state.episode || '01').padStart(2, '0');
   const n = shotNoMap().get(shot.id) || 1;
   return `ep${ep}s${String(n).padStart(2, '0')}`;
+}
+
+// 台词语言：表格列名、Word 列名、外语行前缀都从这里取一处，避免「选了中泰却显示中英」
+function langMeta() {
+  const s = String(state.options?.subLang || '');
+  if (!s) return { header: '台词', tag: '' };
+  const known = {
+    泰语: { label: '中泰', tag: 'TH' },
+    英语: { label: '中英', tag: 'EN' },
+    '英语+泰语': { label: '中英泰', tag: 'TH / EN' },
+  };
+  const m = known[s] || { label: `中${s}`, tag: s };
+  return { header: `${m.label}台词`, tag: m.tag };
+}
+
+// 换台词语言时立刻刷新表头，不用等下一次生成
+function syncLangHeader(sel, inp) {
+  if (!state.data) return;
+  state.options.subLang = sel.value === '__custom' ? inp.value.trim() : sel.value;
+  renderBoard();
 }
 
 function entHTML(shot) {
@@ -444,62 +466,195 @@ function renderInspector() {
   if (state.tab === 'unity') bindUnityEvents();
 }
 
-function bibleHTML() {
+// ---------------------------------------------------------------- 资产空间
+// 原来的「设定卡」其实是资产空间：角色 / 服装 / 场景 / 道具 都是可复用资产，
+// 每项有缩略图、编号、被哪些镜头引用；点开进二级页面改属性、改提示词、出图。
+const ASSET_KINDS = [
+  { key: 'all', label: '全部' },
+  { key: 'char', label: '角色' },
+  { key: 'outfit', label: '服装' },
+  { key: 'scene', label: '场景' },
+  { key: 'prop', label: '道具' },
+];
+const ASSET_LABEL = { char: '角色', outfit: '服装', scene: '场景', prop: '道具' };
+
+function assetList() {
   const b = state.data.bible;
-  let h = '';
-
-  h += `<div class="ent"><div class="ent__head"><span class="ent__id">CAST</span><span class="ent__name">人物</span></div>`;
-  for (const c of b.characters) {
-    h += `<div class="card">
-      <div class="ent__head"><span class="ent__id">${esc(c.id)}</span><span class="ent__name">${esc(c.name)}</span><span class="ent__role">${esc(c.role)} · ${esc(c.age)}</span></div>
-      ${figHTML(`char:${c.id}`)}
-      <p class="card__line" contenteditable="true" data-char="${esc(c.id)}" data-field="appearance"><b>锚点</b>${esc(c.appearance)}</p>
-      ${c.face ? `<p class="card__line"><b>面部</b>${esc(c.face)}</p>` : ''}
-      <div class="card__voice">${['gender', 'age_feel', 'timbre', 'pace', 'emotion']
-        .filter((k) => c.voice?.[k])
-        .map((k) => `<span>${esc(c.voice[k])}</span>`)
-        .join('')}</div>
-      ${c.forbidden?.length ? `<div class="card__forbid">${c.forbidden.map((f) => `<em>禁 ${esc(f)}</em>`).join('')}</div>` : ''}
-      ${(c.outfits || [])
-        .map(
-          (o) => `<div class="card__outfit">
-            <div class="ent__head"><span class="ent__id">${esc(o.id)}</span><span class="ent__name">${esc(o.name)}</span></div>
-            ${figHTML(`outfit:${o.id}`)}
-            <p class="card__line" contenteditable="true" data-outfit="${esc(o.id)}">${esc(o.desc)}</p>
-          </div>`
-        )
-        .join('')}
-    </div>`;
-  }
-  h += `</div>`;
-
-  h += `<div class="ent"><div class="ent__head"><span class="ent__id">SCENE</span><span class="ent__name">场景</span></div>`;
-  for (const s of b.scenes) {
-    h += `<div class="card">
-      <div class="ent__head"><span class="ent__id">${esc(s.id)}</span><span class="ent__name">${esc(s.name)}</span><span class="ent__role">${esc(s.time)}${s.weather ? ' · ' + esc(s.weather) : ''}</span></div>
-      ${figHTML(`scene:${s.id}`)}
-      ${s.place ? `<p class="card__line" contenteditable="true" data-scene="${esc(s.id)}"><b>空间</b>${esc(s.place)}</p>` : ''}
-      <p class="card__line"><b>光线</b>${esc(s.light)}</p>
-      <p class="card__line"><b>色调</b>${esc(s.palette)}</p>
-    </div>`;
-  }
-  h += `</div>`;
-
-  if (b.props?.length) {
-    h += `<div class="ent"><div class="ent__head"><span class="ent__id">PROP</span><span class="ent__name">道具</span></div>`;
-    for (const p of b.props) {
-      h += `<div class="card">
-        <div class="ent__head"><span class="ent__id">${esc(p.id)}</span><span class="ent__name">${esc(p.name)}</span></div>
-        ${figHTML(`prop:${p.id}`)}
-        <p class="card__line"><b>外观</b>${esc(p.look)}</p>
-        ${p.significance ? `<p class="card__line"><b>意义</b>${esc(p.significance)}</p>` : ''}
-      </div>`;
+  const items = [];
+  for (const c of b.characters || []) {
+    items.push({
+      key: `char:${c.id}`,
+      kind: 'char',
+      id: c.id,
+      name: c.name,
+      en: c.name_en || '',
+      meta: [c.role, c.age].filter(Boolean).join(' · '),
+      brief: c.appearance || '',
+    });
+    for (const o of c.outfits || []) {
+      items.push({
+        key: `outfit:${o.id}`,
+        kind: 'outfit',
+        id: o.id,
+        name: o.name,
+        en: '',
+        meta: `${c.name} 的服装`,
+        brief: o.desc || '',
+      });
     }
-    h += `</div>`;
+  }
+  for (const s of b.scenes || []) {
+    items.push({
+      key: `scene:${s.id}`,
+      kind: 'scene',
+      id: s.id,
+      name: s.name,
+      en: s.name_en || '',
+      meta: [s.time, s.weather].filter(Boolean).join(' · '),
+      brief: s.place || '',
+    });
+  }
+  for (const p of b.props || []) {
+    items.push({
+      key: `prop:${p.id}`,
+      kind: 'prop',
+      id: p.id,
+      name: p.name,
+      en: p.name_en || '',
+      meta: '关键道具',
+      brief: p.look || '',
+    });
+  }
+  return items;
+}
+
+// 每项资产被多少个镜头引用 —— 一眼能看出哪些白建了
+function assetUsage() {
+  const m = new Map();
+  const inc = (k) => m.set(k, (m.get(k) || 0) + 1);
+  for (const s of flatShots()) {
+    for (const id of s.characters || []) {
+      inc(`char:${id}`);
+      const oid = (s.outfits || {})[id];
+      if (oid) inc(`outfit:${oid}`);
+    }
+    if (s.scene_id) inc(`scene:${s.scene_id}`);
+    for (const id of s.props || []) inc(`prop:${id}`);
+  }
+  return m;
+}
+
+function bibleHTML() {
+  const items = assetList();
+  const use = assetUsage();
+  const counts = { all: items.length };
+  for (const it of items) counts[it.kind] = (counts[it.kind] || 0) + 1;
+
+  const filtered = state.assetFilter === 'all' ? items : items.filter((i) => i.kind === state.assetFilter);
+  const noImg = items.filter((i) => !state.images[i.key]).length;
+
+  let h = `<section class="assets">
+    <header class="assets__head">
+      <div class="assets__title">
+        <h3>资产空间</h3>
+        <p>${items.length} 项资产${noImg ? ` · ${noImg} 项待出图` : ' · 全部已出图'}</p>
+      </div>
+      <button class="assets__add" data-newasset="1" title="新建资产">＋</button>
+    </header>
+
+    <div class="assets__filters">${ASSET_KINDS.filter((k) => k.key === 'all' || counts[k.key])
+      .map(
+        (k) =>
+          `<button class="chip ${state.assetFilter === k.key ? 'is-active' : ''}" data-filter="${k.key}">${
+            k.label
+          }<em>${counts[k.key] || 0}</em></button>`
+      )
+      .join('')}</div>`;
+
+  if (state.creating) {
+    const hasChar = (state.data.bible.characters || []).length > 0;
+    h += `<div class="assets__new">
+      <span>新建</span>
+      <button data-newkind="char">角色</button>
+      <button data-newkind="scene">场景</button>
+      <button data-newkind="prop">道具</button>
+      <button data-newkind="outfit" ${hasChar ? '' : 'disabled title="先建一个角色"'} class="${
+        hasChar ? '' : 'is-off'
+      }">服装</button>
+      <button class="assets__cancel" data-newcancel="1">取消</button>
+    </div>`;
   }
 
-  h += `<p class="placeholder-note" style="margin-top:14px">提示：锚点可直接改，改完所有镜头的首帧提示词会同步更新。</p>`;
+  h += '<div class="assets__grid">';
+  for (const it of filtered) {
+    const url = state.images[it.key];
+    const n = use.get(it.key) || 0;
+    h += `<button class="asset ${url ? 'is-ready' : ''}" type="button" data-detail="${esc(it.key)}" title="${esc(
+      it.brief || it.name
+    )}">
+      <span class="asset__thumb">${
+        url ? `<img src="${esc(url)}" alt="" loading="lazy" />` : '<span class="asset__ph">待出图</span>'
+      }<span class="asset__badge">${ASSET_LABEL[it.kind]} ${esc(it.id)}</span></span>
+      <span class="asset__body">
+        <span class="asset__name">${esc(it.name)}${it.en ? `<i>${esc(it.en)}</i>` : ''}</span>
+        <span class="asset__meta">${esc(it.meta) || ASSET_LABEL[it.kind]}</span>
+        <span class="asset__use ${n ? '' : 'is-idle'}">${n ? `${n} 镜引用` : '未使用'}</span>
+      </span>
+    </button>`;
+  }
+  h += '</div>';
+
+  if (!filtered.length) h += '<p class="placeholder-note">这一类还没有资产。</p>';
+  h += '</section>';
   return h;
+}
+
+function nextAssetId(prefix, arr) {
+  let n = 0;
+  for (const x of arr) {
+    const m = String(x.id || '').match(/(\d+)/);
+    if (m) n = Math.max(n, Number(m[1]));
+  }
+  return `${prefix}${n + 1}`;
+}
+
+function createAsset(kind) {
+  const b = state.data.bible;
+  b.characters = b.characters || [];
+  b.scenes = b.scenes || [];
+  b.props = b.props || [];
+  let key = '';
+
+  if (kind === 'char') {
+    const id = nextAssetId('C', b.characters);
+    b.characters.push({
+      id, name: '新角色', name_en: '', role: '', age: '',
+      appearance: '待补充外观', face: '', forbidden: [], voice: {}, outfits: [],
+    });
+    key = `char:${id}`;
+  } else if (kind === 'scene') {
+    const id = nextAssetId('S', b.scenes);
+    b.scenes.push({ id, name: '新场景', name_en: '', time: '', weather: '', place: '', light: '', palette: '' });
+    key = `scene:${id}`;
+  } else if (kind === 'prop') {
+    const id = nextAssetId('P', b.props);
+    b.props.push({ id, name: '新道具', name_en: '', look: '待补充外观', significance: '' });
+    key = `prop:${id}`;
+  } else if (kind === 'outfit') {
+    const c = b.characters[0];
+    if (!c) return toast('先建一个角色，再给它加服装');
+    c.outfits = c.outfits || [];
+    const all = b.characters.flatMap((x) => x.outfits || []);
+    const id = nextAssetId('O', all);
+    c.outfits.push({ id, name: '新服装', desc: '' });
+    key = `outfit:${id}`;
+  } else return;
+
+  state.bibleDirty = true;
+  state.creating = false;
+  renderInspector();
+  openDetail(key);
+  toast('已新建，补全属性后点「生成预览」');
 }
 
 const TIMBRES = ['清冷偏低', '低沉沙哑', '温柔', '甜美', '活泼', '苍老', '浑厚', '中性'];
@@ -609,38 +764,30 @@ function refreshSelection() {
 }
 
 function bindBibleEvents() {
-  $$('#inspectorBody [contenteditable][data-char]').forEach((el) => {
-    el.addEventListener('blur', () => {
-      const c = state.data.bible.characters.find((x) => x.id === el.dataset.char);
-      if (!c) return;
-      c.appearance = el.textContent.trim();
-      afterEdit(true);
+  $$('#inspectorBody [data-filter]').forEach((el) => {
+    el.addEventListener('click', () => {
+      state.assetFilter = el.dataset.filter;
+      renderInspector();
     });
   });
 
-  // 服装描述：改完就是下次出图 / 重生成的新约束
-  $$('#inspectorBody [contenteditable][data-outfit]').forEach((el) => {
-    el.addEventListener('blur', () => {
-      for (const c of state.data.bible.characters) {
-        const o = (c.outfits || []).find((x) => x.id === el.dataset.outfit);
-        if (o) {
-          o.desc = el.textContent.trim();
-          afterEdit(true);
-          return;
-        }
-      }
+  const add = $('#inspectorBody [data-newasset]');
+  if (add) {
+    add.addEventListener('click', () => {
+      state.creating = !state.creating;
+      renderInspector();
     });
+  }
+  $$('#inspectorBody [data-newkind]').forEach((el) => {
+    el.addEventListener('click', () => createAsset(el.dataset.newkind));
   });
-
-  // 场景空间描述
-  $$('#inspectorBody [contenteditable][data-scene]').forEach((el) => {
-    el.addEventListener('blur', () => {
-      const s = state.data.bible.scenes.find((x) => x.id === el.dataset.scene);
-      if (!s) return;
-      s.place = el.textContent.trim();
-      afterEdit(true);
+  const cancel = $('#inspectorBody [data-newcancel]');
+  if (cancel) {
+    cancel.addEventListener('click', () => {
+      state.creating = false;
+      renderInspector();
     });
-  });
+  }
 }
 
 function checkHTML() {
@@ -943,7 +1090,7 @@ function exportJson() {
 // 真正的 .docx：自己拼 OOXML 再打 zip，不依赖库
 function exportDocx() {
   if (!state.data) return;
-  const langLabel = state.options.subLang ? state.options.subLang.slice(0, 2) : 'EN';
+  const lang = langMeta();
   const ep = String(state.episode || '01').padStart(2, '0');
   const scenes = state.data.scenes.map((sc) => ({
     ...sc,
@@ -954,7 +1101,8 @@ function exportDocx() {
     subtitle: `ep${ep}${state.episodeName ? ' ' + state.episodeName : ''} · ${new Date().toLocaleDateString('zh-CN')} · ${flatShots().length} 个镜头 · ${state.options.style || ''}`,
     scenes,
     bible: state.data.bible,
-    langLabel,
+    lineHeader: lang.header,
+    lineTag: lang.tag,
   });
   download(
     `分镜本_${Date.now()}.docx`,
@@ -1041,9 +1189,9 @@ function promptFor(kind, id) {
     const outfit = (e.outfits || [])[0];
     return [
       `${head}，角色三视图设定图：同一个人物并排三个角度——正面全身、四分之三侧面全身、正侧面全身，三个角度等高并列，纯浅灰背景，无文字、无边框、无标签。`,
-      `人物：${e.name}，${e.age || ''}。外貌：${e.appearance}。`,
+      `人物：${e.name}${e.age ? '，' + e.age : ''}。外貌：${e.appearance}。`,
       e.face ? `面部：${e.face}。` : '',
-      `服装：${outfit ? outfit.desc : '日常便装'}。`,
+      `服装：${outfit?.desc || '日常便装'}。`,
       `三个角度必须画成同一个人：脸型、五官、发型、疤、服装细节完全一致；不要换装，不要出现第二个角色。`,
       e.forbidden?.length ? `不要出现：${e.forbidden.join('、')}。` : '',
     ].filter(Boolean).join('\n');
@@ -1057,9 +1205,10 @@ function promptFor(kind, id) {
     ].join('\n');
   }
   if (kind === 'scene') {
+    const when = [e.time ? `时间：${e.time}` : '', e.weather ? `天气：${e.weather}` : ''].filter(Boolean).join('，');
     return [
       `${head}，场景多角度设定图：同一个空间的三个视角并排——全景主视角、反打视角（从相反方向看）、以及一个关键陈设的特写。`,
-      `地点：${e.name}。时间：${e.time || ''}，天气：${e.weather || ''}。`,
+      `地点：${e.name}${when ? '。' + when : ''}。`,
       e.place ? `空间与陈设：${e.place}` : '',
       e.light ? `光线：${e.light}` : '',
       e.palette ? `色调：${e.palette}` : '',
@@ -1075,12 +1224,6 @@ function promptFor(kind, id) {
     ].filter(Boolean).join('\n');
   }
   return '';
-}
-
-function figHTML(key) {
-  const url = state.images[key];
-  const inner = url ? `<img src="${esc(url)}" alt="" loading="lazy" />` : `<span>生成参考图</span>`;
-  return `<div class="card__fig" data-detail="${esc(key)}">${inner}</div>`;
 }
 
 // 这个镜头能当参照图的设定卡：人物 → 场景 → 本镜穿的那套服装 → 道具（最多 3 张，够用又不至于拖慢出图）
@@ -1155,7 +1298,7 @@ function renderDetailFig() {
   const url = key ? state.images[key] : '';
   $('#detailFig').innerHTML = url
     ? `<img src="${esc(url)}" alt="" />`
-    : `<span class="detail__empty">还没有图，点下面的「生成预览」</span>`;
+    : `<span class="detail__empty">还没有图，改完属性点「生成预览」</span>`;
 }
 
 function openDetail(key) {
@@ -1165,9 +1308,8 @@ function openDetail(key) {
   if (!e) return toast('找不到这一条');
   state.detailKey = key;
   state.detailKind = kind;
-  $('#detailKind').textContent = KIND_LABEL[kind] || kind;
-  const name = kind === 'outfit' ? `${e.name}（${e.owner.name}）` : e.name || '';
-  $('#detailTitle').textContent = `${id}${name ? ' · ' + name : ''}`;
+  $('#detailKind').textContent = ASSET_LABEL[kind] || KIND_LABEL[kind] || kind;
+  $('#detailTitle').textContent = detailTitle(kind, id);
   $('#detailPrompt').value = state.promptEdits[key] || promptFor(kind, id);
   $('#detailRevise').value = '';
   $('#detailTip').textContent =
@@ -1176,8 +1318,102 @@ function openDetail(key) {
       : '多视图出图约 60–90 秒。';
   renderDetailFig();
   renderRefs();
+  renderDetailFields();
   $('#detail').hidden = false;
   document.body.style.overflow = 'hidden';
+}
+
+function detailTitle(kind, id) {
+  const e = findEntity(kind, id);
+  if (!e) return id;
+  if (kind === 'shot') return displayId(e);
+  const name = kind === 'outfit' ? `${e.name}（${e.owner.name}）` : e.name || '';
+  return `${id}${name ? ' · ' + name : ''}`;
+}
+
+// 资产属性：改哪一项都会同步进提示词和所有引用它的镜头
+const DETAIL_FIELDS = {
+  char: [
+    ['name', '名称'],
+    ['name_en', '英文名'],
+    ['role', '身份'],
+    ['age', '年龄'],
+    ['appearance', '外观锚点', 'area', '发型、体型、疤痕、习惯性表情 —— 每个镜头都会原样引用'],
+    ['face', '面部特征', 'area'],
+    ['forbidden', '禁止出现', 'area', '逗号分隔；这些元素每个镜头都不许出现'],
+  ],
+  outfit: [['name', '服装名称'], ['desc', '服装描述', 'area', '版型、面料、颜色、纹样、磨损；出图只画衣服，不出现脸']],
+  scene: [
+    ['name', '场景名称'],
+    ['name_en', '英文名'],
+    ['time', '时间'],
+    ['weather', '天气'],
+    ['place', '空间与陈设', 'area', '从门到窗有什么、家具位置、地面材质 —— 三个视角靠它对齐'],
+    ['light', '光线'],
+    ['palette', '色调'],
+  ],
+  prop: [
+    ['name', '道具名称'],
+    ['name_en', '英文名'],
+    ['look', '外观', 'area', '材质、尺寸、缺口与磨损位置'],
+    ['significance', '剧情作用'],
+  ],
+};
+
+function renderDetailFields() {
+  const box = $('#detailFields');
+  const kind = state.detailKind;
+  const id = String(state.detailKey || '').split(':')[1];
+  const spec = DETAIL_FIELDS[kind];
+  const e = findEntity(kind, id);
+  if (!spec || !e) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+
+  const val = (f) => (f === 'forbidden' ? (e.forbidden || []).join('，') : e[f] ?? '');
+  let h = '';
+  if (kind === 'outfit') h += `<div class="fld fld--wide"><span>所属角色</span><b class="fld__ro">${esc(e.owner.name)}</b></div>`;
+  h += spec
+    .map(
+      ([f, label, type, hint]) => `<label class="fld ${type === 'area' ? 'fld--wide' : ''}">
+        <span>${label}</span>
+        ${
+          type === 'area'
+            ? `<textarea data-fld="${f}" rows="3">${esc(val(f))}</textarea>`
+            : `<input data-fld="${f}" value="${esc(val(f))}" />`
+        }
+        ${hint ? `<em>${hint}</em>` : ''}
+      </label>`
+    )
+    .join('');
+  box.hidden = false;
+  box.innerHTML = h;
+
+  $$('#detailFields [data-fld]').forEach((el) => {
+    el.addEventListener('change', () => commitDetailField(kind, id, el.dataset.fld, el.value));
+  });
+}
+
+function commitDetailField(kind, id, field, raw) {
+  const e = findEntity(kind, id);
+  if (!e) return;
+  const target = kind === 'outfit' ? (e.owner.outfits || []).find((o) => o.id === id) : e;
+  if (!target) return;
+
+  if (field === 'forbidden') target.forbidden = String(raw).split(/[,，、;；\s]+/).filter(Boolean);
+  else target[field] = String(raw).trim();
+
+  state.bibleDirty = true;
+  recompute();
+  renderStats();
+  renderBadge();
+  renderBoard();
+  renderInspector();
+  $('#detailTitle').textContent = detailTitle(kind, id);
+  if (!state.promptEdits[state.detailKey]) $('#detailPrompt').value = promptFor(kind, id);
+  toast('已更新，提示词已同步');
 }
 
 function closeDetail() {
@@ -1306,7 +1542,9 @@ function init() {
     sel.addEventListener('change', () => {
       inp.hidden = sel.value !== '__custom';
       if (!inp.hidden) inp.focus();
+      syncLangHeader(sel, inp);
     });
+    if (selId === '#optLang') inp.addEventListener('input', () => syncLangHeader(sel, inp));
   });
 
   // 上传文件（主入口）+ 拖拽
